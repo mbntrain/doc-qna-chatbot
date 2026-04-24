@@ -21,22 +21,35 @@ with btn_col:
 
 if load_clicked:
     if uploaded:
-        st.session_state["doc_text"] = parse_file(uploaded)
+        try:
+            st.session_state["doc_text"] = parse_file(uploaded)
+            st.session_state["doc_name"] = uploaded.name
+        except ValueError as e:
+            st.error(str(e))
     elif pasted_text.strip():
         st.session_state["doc_text"] = pasted_text.strip()
+        st.session_state["doc_name"] = "Pasted text"
     else:
         st.error("Upload a file or paste text first.")
 
 doc_text = st.session_state.get("doc_text", "")
 
 if doc_text:
+    doc_name = st.session_state.get("doc_name", "Document")
+    st.caption(f"📄 Loaded: **{doc_name}** ({len(doc_text):,} characters)")
     st.text_area("Document Preview", doc_text, height=200, disabled=True)
     question = st.text_input("Ask a question about the document:")
 
-    if st.button("Get Answer") and question:
-        with st.spinner("Finding answer..."):
-            answer, confidence = answer_question(doc_text, question)
-        st.success(f"**Answer:** {answer}")
-        st.progress(confidence, text=f"Confidence: {int(confidence * 100)}%")
+    if st.button("Get Answer"):
+        if not question.strip():
+            st.warning("Please enter a question.")
+        else:
+            with st.spinner("Finding answer..."):
+                answer, confidence = answer_question(doc_text, question)
+            st.success(f"**Answer:** {answer}")
+            if confidence > 0:
+                st.progress(confidence, text=f"Confidence: {int(confidence * 100)}%")
+            else:
+                st.warning("Low relevance — try rephrasing your question.")
 else:
     st.info("Upload a file or paste text, then click Load.")
