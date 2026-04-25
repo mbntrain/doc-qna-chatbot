@@ -39,17 +39,38 @@ if doc_text:
     st.caption(f"📄 Loaded: **{doc_name}** ({len(doc_text):,} characters)")
     st.text_area("Document Preview", doc_text, height=200, disabled=True)
     question = st.text_input("Ask a question about the document:")
+    method = st.radio("Search method:", ["bow", "bm25"], horizontal=True,
+                      help="BoW = Bag of Words + Cosine Similarity | BM25 = Best Match 25 (Elasticsearch's algorithm)")
+
+    compare = st.checkbox("Compare both methods side by side")
 
     if st.button("Get Answer"):
         if not question.strip():
             st.warning("Please enter a question.")
+        elif compare:
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.markdown("**🔤 BM25**")
+                ans_t, conf_t, dbg_t = answer_question(doc_text, question, method="bm25")
+                st.success(ans_t)
+                if conf_t > 0:
+                    st.progress(conf_t, text=f"Confidence: {int(conf_t * 100)}%")
+                st.caption(f"Raw score: {dbg_t.get('raw_score', 0):.4f}")
+            with col_b:
+                st.markdown("**📐 Bag of Words + Cosine**")
+                ans_b, conf_b, dbg_b = answer_question(doc_text, question, method="bow")
+                st.success(ans_b)
+                if conf_b > 0:
+                    st.progress(conf_b, text=f"Confidence: {int(conf_b * 100)}%")
+                st.caption(f"Cosine similarity: {dbg_b.get('raw_score', 0):.4f}")
         else:
             with st.spinner("Finding answer..."):
-                answer, confidence = answer_question(doc_text, question)
+                answer, confidence, debug = answer_question(doc_text, question, method=method)
             st.success(f"**Answer:** {answer}")
             if confidence > 0:
                 st.progress(confidence, text=f"Confidence: {int(confidence * 100)}%")
             else:
                 st.warning("Low relevance — try rephrasing your question.")
+            st.caption(f"Method: {debug.get('method', '')} | Score: {debug.get('raw_score', 0):.4f}")
 else:
     st.info("Upload a file or paste text, then click Load.")
