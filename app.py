@@ -39,30 +39,38 @@ if doc_text:
     st.caption(f"📄 Loaded: **{doc_name}** ({len(doc_text):,} characters)")
     st.text_area("Document Preview", doc_text, height=200, disabled=True)
     question = st.text_input("Ask a question about the document:")
-    method = st.radio("Search method:", ["bow", "bm25"], horizontal=True,
-                      help="BoW = Bag of Words + Cosine Similarity | BM25 = Best Match 25 (Elasticsearch's algorithm)")
+    method = st.radio("Search method:", ["bow", "bm25", "word2vec"], horizontal=True,
+                      help="BoW = Bag of Words | BM25 = Elasticsearch's algorithm | Word2Vec = Pre-trained word embeddings")
 
-    compare = st.checkbox("Compare both methods side by side")
+    compare = st.checkbox("Compare all methods side by side")
 
     if st.button("Get Answer"):
         if not question.strip():
             st.warning("Please enter a question.")
         elif compare:
-            col_a, col_b = st.columns(2)
+            col_a, col_b, col_c = st.columns(3)
             with col_a:
                 st.markdown("**🔤 BM25**")
                 ans_t, conf_t, dbg_t = answer_question(doc_text, question, method="bm25")
                 st.success(ans_t)
                 if conf_t > 0:
                     st.progress(conf_t, text=f"Confidence: {int(conf_t * 100)}%")
-                st.caption(f"Raw score: {dbg_t.get('raw_score', 0):.4f}")
+                st.caption(f"Score: {dbg_t.get('raw_score', 0):.4f}")
             with col_b:
-                st.markdown("**📐 Bag of Words + Cosine**")
+                st.markdown("**📐 Bag of Words**")
                 ans_b, conf_b, dbg_b = answer_question(doc_text, question, method="bow")
                 st.success(ans_b)
                 if conf_b > 0:
                     st.progress(conf_b, text=f"Confidence: {int(conf_b * 100)}%")
-                st.caption(f"Cosine similarity: {dbg_b.get('raw_score', 0):.4f}")
+                st.caption(f"Cosine: {dbg_b.get('raw_score', 0):.4f}")
+            with col_c:
+                st.markdown("**🧠 Word2Vec**")
+                with st.spinner("Loading model..."):
+                    ans_w, conf_w, dbg_w = answer_question(doc_text, question, method="word2vec")
+                st.success(ans_w)
+                if conf_w > 0:
+                    st.progress(conf_w, text=f"Confidence: {int(conf_w * 100)}%")
+                st.caption(f"Cosine: {dbg_w.get('raw_score', 0):.4f}")
         else:
             with st.spinner("Finding answer..."):
                 answer, confidence, debug = answer_question(doc_text, question, method=method)

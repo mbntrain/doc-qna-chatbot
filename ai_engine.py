@@ -1,5 +1,6 @@
 import re
 import math
+import numpy as np
 from collections import Counter
 
 STOP_WORDS = {"what", "who", "where", "when", "why", "how", "is", "are", "was",
@@ -100,9 +101,61 @@ def _search_bow_cosine(question: str, sentences: list[str],
     return best_idx, round(best_score, 4)
 
 
+# --- SEARCH METHOD 3: Word2Vec + Cosine Similarity (Era 3) ---
+
+_w2v_model = None
+
+def _load_word2vec():
+    """Lazy-load GloVe vectors. First call downloads ~66MB, then cached."""
+    global _w2v_model
+    if _w2v_model is None:
+        import gensim.downloader as api
+        _w2v_model = api.load("glove-wiki-gigaword-50")  # 50-dim vectors, ~400k words
+    return _w2v_model
+
+
+def _sentence_vector_w2v(tokens: list[str], model) -> np.ndarray:
+    """Average word vectors to create a sentence vector.
+    This is the simplest approach — just average all word embeddings.
+    Words not in vocabulary are skipped.
+    """
+    vectors = [model[w] for w in tokens if w in model]
+    if not vectors:
+        return np.zeros(model.vector_size)
+    return np.mean(vectors, axis=0)
+
+
+def _cosine_sim_dense(a: np.ndarray, b: np.ndarray) -> float:
+    """Cosine similarity for dense numpy vectors (same formula, different input)."""
+    dot = np.dot(a, b)
+    mag = np.linalg.norm(a) * np.linalg.norm(b)
+    return float(dot / mag) if mag > 0 else 0.0
+
+
+def _search_word2vec(question: str, sentences: list[str],
+                     tokenized_sentences: list[list[str]]) -> tuple[int, float]:
+    """Each word has a pre-trained 50-dim vector. Average them per sentence.
+    Now 'offer' is NEAR 'provides' in vector space — synonyms work!
+    But 'bank' (river) = 'bank' (money) — context is lost.
+    """
+    model = _load_word2vec()
+    q_tokens = [w for w in _tokenize(question) if w not in STOP_WORDS]
+    q_vec = _sentence_vector_w2v(q_tokens, model)
+
+    best_idx, best_score = -1, 0.0
+    for i, tokens in enumerate(tokenized_sentences):
+        s_vec = _sentence_vector_w2v(tokens, model)
+        score = _cosine_sim_dense(q_vec, s_vec)
+        if score > best_score:
+            best_score = score
+            best_idx = i
+
+    return best_idx, round(best_score, 4)
+
+
 def answer_question(context: str, question: str,
                     method: str = "bow") -> tuple[str, float, dict]:
-    """Find the most relevant sentence. method='bm25' or 'bow' (bag of words)."""
+    """Find the most relevant sentence. method='bm25', 'bow', or 'word2vec'."""
     keywords = _get_keywords(question)
     if not keywords:
         return "Could not understand the question.", 0.0, {}
@@ -115,6 +168,8 @@ def answer_question(context: str, question: str,
 
     if method == "bm25":
         best_idx, raw_score = _search_bm25(keywords, sentences, tokenized_sentences)
+    elif method == "word2vec":
+        best_idx, raw_score = _search_word2vec(question, sentences, tokenized_sentences)
     else:
         best_idx, raw_score = _search_bow_cosine(question, sentences, tokenized_sentences)
 
