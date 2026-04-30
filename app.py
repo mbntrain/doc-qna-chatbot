@@ -2,7 +2,7 @@ import streamlit as st
 from file_parser import parse_file
 from ai_engine import answer_question
 
-st.title("Document Q&A Chatbot")
+st.title("Jay — AI Doc Q&A Chatbot")
 
 col1, col_sep, col2 = st.columns([5, 1, 5])
 
@@ -39,8 +39,8 @@ if doc_text:
     st.caption(f"📄 Loaded: **{doc_name}** ({len(doc_text):,} characters)")
     st.text_area("Document Preview", doc_text, height=200, disabled=True)
     question = st.text_input("Ask a question about the document:")
-    method = st.radio("Search method:", ["bow", "bm25", "word2vec"], horizontal=True,
-                      help="BoW = Bag of Words | BM25 = Elasticsearch's algorithm | Word2Vec = Pre-trained word embeddings")
+    method = st.radio("Search method:", ["bow", "bm25", "word2vec", "faiss"], horizontal=True,
+                      help="BoW = Bag of Words | BM25 = Elasticsearch | Word2Vec = Embeddings | FAISS = Vector index (fast for long docs)")
 
     compare = st.checkbox("Compare all methods side by side")
 
@@ -48,7 +48,7 @@ if doc_text:
         if not question.strip():
             st.warning("Please enter a question.")
         elif compare:
-            col_a, col_b, col_c = st.columns(3)
+            col_a, col_b, col_c, col_d = st.columns(4)
             with col_a:
                 st.markdown("**🔤 BM25**")
                 ans_t, conf_t, dbg_t = answer_question(doc_text, question, method="bm25")
@@ -71,6 +71,14 @@ if doc_text:
                 if conf_w > 0:
                     st.progress(conf_w, text=f"Confidence: {int(conf_w * 100)}%")
                 st.caption(f"Cosine: {dbg_w.get('raw_score', 0):.4f}")
+            with col_d:
+                st.markdown("**⚡ FAISS**")
+                with st.spinner("Building index..."):
+                    ans_f, conf_f, dbg_f = answer_question(doc_text, question, method="faiss")
+                st.success(ans_f)
+                if conf_f > 0:
+                    st.progress(conf_f, text=f"Confidence: {int(conf_f * 100)}%")
+                st.caption(f"Score: {dbg_f.get('score', 0):.4f}")
         else:
             with st.spinner("Finding answer..."):
                 answer, confidence, debug = answer_question(doc_text, question, method=method)
@@ -79,6 +87,6 @@ if doc_text:
                 st.progress(confidence, text=f"Confidence: {int(confidence * 100)}%")
             else:
                 st.warning("Low relevance — try rephrasing your question.")
-            st.caption(f"Method: {debug.get('method', '')} | Score: {debug.get('raw_score', 0):.4f}")
+            st.caption(f"Method: {debug.get('method', '')} | Score: {debug.get('raw_score', debug.get('score', 0)):.4f}")
 else:
     st.info("Upload a file or paste text, then click Load.")

@@ -153,13 +153,58 @@ def _search_word2vec(question: str, sentences: list[str],
     return best_idx, round(best_score, 4)
 
 
+# --- SEARCH METHOD 4: FAISS Index (Era 4 — scalable vector search) ---
+
+def _search_faiss(question: str, chunks: list[str], doc_hash: str = None) -> tuple[str, float]:
+    """Search using FAISS-indexed GloVe vectors. O(log n) for large documents.
+    Handles 50+ page PDFs efficiently. Returns matched chunk + similarity score.
+    Caches index by doc_hash for instant re-uploads.
+    """
+    from faiss_index import FAISSIndex
+    from chunker import chunk_text
+    
+    index = FAISSIndex()
+    
+    # Try to load from cache if doc_hash provided
+    if doc_hash and index.load(doc_hash):
+        # Cache hit — use existing index
+        pass
+    else:
+        # Cache miss — build and save
+        index.build(chunks)
+        if doc_hash:
+            index.save(doc_hash)
+    
+    results = index.search(question, k=1)
+    if results:
+        chunk_text, score = results[0]
+        return chunk_text, score
+    return "No relevant chunk found.", 0.0
+
+
 def answer_question(context: str, question: str,
                     method: str = "bow") -> tuple[str, float, dict]:
-    """Find the most relevant sentence. method='bm25', 'bow', or 'word2vec'."""
+    """Find the most relevant sentence/chunk. method='bm25', 'bow', 'word2vec', or 'faiss'."""
     keywords = _get_keywords(question)
     if not keywords:
         return "Could not understand the question.", 0.0, {}
 
+    if method == "faiss":
+        # FAISS path: chunk first, then search
+        from chunker import chunk_text
+        import hashlib
+        
+        chunks = chunk_text(context, chunk_size=300, overlap=50)
+        if not chunks:
+            return "No content to search.", 0.0, {}
+        
+        # Compute doc hash for caching
+        doc_hash = hashlib.sha256(context.encode()).hexdigest()[:16]
+        answer, score = _search_faiss(question, chunks, doc_hash=doc_hash)
+        debug = {"method": "faiss", "score": score}
+        return answer, score, debug
+    
+    # Classical path: sentence-based search
     sentences = _split_sentences(context)
     if not sentences:
         return "No content to search.", 0.0, {}
