@@ -1,5 +1,4 @@
 import hashlib
-import json
 import os
 import pickle
 import numpy as np
@@ -11,88 +10,113 @@ except ImportError:
 
 from ai_engine import _load_word2vec, _sentence_vector_w2v, _tokenize
 
+_STOP = {"what", "who", "where", "when", "why", "how", "is", "are"}
+
 
 class FAISSIndex:
     def __init__(self, cache_dir: str = ".faiss_cache"):
         self.cache_dir = cache_dir
         self.index = None
-        self.chunks = None
-        self.doc_hash = None
+        # each entry: {"text": str, "doc_name": str}
+        self.chunks_meta: list[dict] = []
         os.makedirs(cache_dir, exist_ok=True)
-    
-    def _compute_hash(self, text: str) -> str:
-        """Hash of document content for cache key."""
+
+    # --- hashing ---
+
+    @staticmethod
+    def _hash(text: str) -> str:
         return hashlib.sha256(text.encode()).hexdigest()[:16]
-    
-    def _get_cache_paths(self, doc_hash: str) -> tuple[str, str, str]:
-        """Return paths for index, chunks, metadata."""
-        index_path = os.path.join(self.cache_dir, f"{doc_hash}.index")
-        chunks_path = os.path.join(self.cache_dir, f"{doc_hash}.pkl")
-        meta_path = os.path.join(self.cache_dir, f"{doc_hash}.meta")
-        return index_path, chunks_path, meta_path
-    
-    def build(self, chunks: list[str]) -> None:
-        """Build FAISS index from chunks using GloVe embeddings."""
+
+    @staticmethod
+    def multi_hash(texts: list[str]) -> str:
+        """Stable cache key for a set of documents (order-independent)."""
+        hashes = sorted(FAISSIndex._hash(t) for t in texts)
+        return hashlib.sha256("|".join(hashes).encode()).hexdigest()[:16]
+
+    def _cache_paths(self, doc_hash: str) -> tuple[str, str]:
+        base = os.path.join(self.cache_dir, doc_hash)
+        return f"{base}.index", f"{base}.pkl"
+
+    # --- build ---
+
+    def _embed(self, chunks_meta: list[dict]) -> np.ndarray:
         model = _load_word2vec()
-        embeddings = []
-        
-        for chunk in chunks:
-            tokens = [w for w in _tokenize(chunk) if w.lower() not in 
-                     {"what", "who", "where", "when", "why", "how", "is", "are"}]
-            vec = _sentence_vector_w2v(tokens, model)
-            embeddings.append(vec)
-        
-        embeddings = np.array(embeddings, dtype=np.float32)
-        
-        # Build FAISS index (flat L2 distance)
+        vecs = [
+            _sentence_vector_w2v(
+                [w for w in _tokenize(cm["text"]) if w.lower() not in _STOP],
+                model,
+            )
+            for cm in chunks_meta
+        ]
+        return np.array(vecs, dtype=np.float32)
+
+    def build(self, chunks: list[str], doc_name: str = "doc") -> None:
+        """Single-doc convenience wrapper."""
+        self.build_multi([(doc_name, chunks)])
+
+    def build_multi(self, doc_chunks: list[tuple[str, list[str]]]) -> None:
+        """Build one index from multiple docs.
+        doc_chunks: [(doc_name, [chunk_text, ...]), ...]
+        """
+        self.chunks_meta = [
+            {"text": chunk, "doc_name": doc_name}
+            for doc_name, chunks in doc_chunks
+            for chunk in chunks
+        ]
+        embeddings = self._embed(self.chunks_meta)
         self.index = faiss.IndexFlatL2(embeddings.shape[1])
         self.index.add(embeddings)
-        self.chunks = chunks
-    
+
+    # --- persist ---
+
     def save(self, doc_hash: str) -> None:
-        """Persist index and chunks to disk."""
-        if self.index is None or self.chunks is None:
-            raise ValueError("No index built yet")
-        
-        index_path, chunks_path, meta_path = self._get_cache_paths(doc_hash)
-        faiss.write_index(self.index, index_path)
-        with open(chunks_path, 'wb') as f:
-            pickle.dump(self.chunks, f)
-        with open(meta_path, 'w') as f:
-            json.dump({"doc_hash": doc_hash, "num_chunks": len(self.chunks)}, f)
-    
+        idx_path, meta_path = self._cache_paths(doc_hash)
+        faiss.write_index(self.index, idx_path)
+        with open(meta_path, "wb") as f:
+            pickle.dump(self.chunks_meta, f)
+
     def load(self, doc_hash: str) -> bool:
-        """Load index from cache. Return True if successful."""
-        index_path, chunks_path, meta_path = self._get_cache_paths(doc_hash)
-        
-        if not os.path.exists(index_path):
+        idx_path, meta_path = self._cache_paths(doc_hash)
+        if not os.path.exists(idx_path):
             return False
-        
         try:
-            self.index = faiss.read_index(index_path)
-            with open(chunks_path, 'rb') as f:
-                self.chunks = pickle.load(f)
-            self.doc_hash = doc_hash
+            self.index = faiss.read_index(idx_path)
+            with open(meta_path, "rb") as f:
+                self.chunks_meta = pickle.load(f)
             return True
         except Exception:
             return False
-    
-    def search(self, query: str, k: int = 3) -> list[tuple[str, float]]:
-        """Search for top-k most similar chunks. Return [(chunk, distance), ...]."""
-        if self.index is None or self.chunks is None:
+
+    # --- search ---
+
+    def search(self, query: str, k: int = 3) -> list[tuple[str, str, float]]:
+        """Return top-k results as [(chunk_text, doc_name, score), ...]."""
+        if self.index is None:
             raise ValueError("No index loaded")
-        
+
         model = _load_word2vec()
-        q_tokens = [w for w in _tokenize(query) if w.lower() not in 
-                   {"what", "who", "where", "when", "why", "how", "is", "are"}]
-        q_vec = _sentence_vector_w2v(q_tokens, model)
-        q_vec = np.array([q_vec], dtype=np.float32)
-        
+        q_tokens = [w for w in _tokenize(query) if w.lower() not in _STOP]
+        q_vec = np.array([_sentence_vector_w2v(q_tokens, model)], dtype=np.float32)
+
         distances, indices = self.index.search(q_vec, k)
         results = []
         for dist, idx in zip(distances[0], indices[0]):
-            if idx < len(self.chunks):
-                # Convert L2 distance to similarity (lower distance = higher similarity)
-                similarity = float(1.0 / (1.0 + float(dist)))
-                results.append((self.chunks[idx], round(similarity, 4)))
+            if 0 <= idx < len(self.chunks_meta):
+                score = round(1.0 / (1.0 + float(dist)), 4)
+                cm = self.chunks_meta[idx]
+                results.append((cm["text"], cm["doc_name"], score))
         return results
+
+    # --- info ---
+
+    @property
+    def num_chunks(self) -> int:
+        return len(self.chunks_meta)
+
+    @property
+    def doc_names(self) -> list[str]:
+        seen: list[str] = []
+        for cm in self.chunks_meta:
+            if cm["doc_name"] not in seen:
+                seen.append(cm["doc_name"])
+        return seen
