@@ -161,7 +161,6 @@ def _search_faiss(question: str, chunks: list[str], doc_hash: str = None) -> tup
     Caches index by doc_hash for instant re-uploads.
     """
     from faiss_index import FAISSIndex
-    from chunker import chunk_text
     
     index = FAISSIndex()
     
@@ -178,7 +177,7 @@ def _search_faiss(question: str, chunks: list[str], doc_hash: str = None) -> tup
     results = index.search(question, k=1)
     if results:
         chunk_text, score = results[0]
-        return chunk_text, score
+        return chunk_text, float(score)
     return "No relevant chunk found.", 0.0
 
 
@@ -194,14 +193,24 @@ def answer_question(context: str, question: str,
         from chunker import chunk_text
         import hashlib
         
-        chunks = chunk_text(context, chunk_size=300, overlap=50)
+        chunks = chunk_text(context, "test", chunk_size=300, overlap=50)
         if not chunks:
             return "No content to search.", 0.0, {}
+        if len(chunks) <= 1:
+            chunk_texts = _split_sentences(context)
+            unit = "sentence"
+            if not chunk_texts:
+                chunk_texts = [context.strip()]
+        else:
+            chunk_texts = [c.text for c in chunks]
+            unit = "chunk"
         
         # Compute doc hash for caching
-        doc_hash = hashlib.sha256(context.encode()).hexdigest()[:16]
-        answer, score = _search_faiss(question, chunks, doc_hash=doc_hash)
-        debug = {"method": "faiss", "score": score}
+        cache_key = f"{context}|faiss|{unit}|300|50"
+        doc_hash = hashlib.sha256(cache_key.encode()).hexdigest()[:16]
+        answer, score = _search_faiss(question, chunk_texts, doc_hash=doc_hash)
+        score = float(score)
+        debug = {"method": "faiss", "score": score, "unit": unit, "units": len(chunk_texts)}
         return answer, score, debug
     
     # Classical path: sentence-based search

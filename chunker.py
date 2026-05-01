@@ -40,7 +40,7 @@ def _paragraph_token_positions(text: str) -> list[int]:
     return breaks
 
 
-def chunk_document(text: str, doc_name: str,
+def chunk_text(text: str, doc_name: str,
                    chunk_size: int = 300,
                    overlap: int = 50) -> list[Chunk]:
     """Split a document into overlapping fixed-size token chunks.
@@ -82,3 +82,5 @@ def chunk_document(text: str, doc_name: str,
         if end >= len(tokens):
             break
         pos = end - overlap  # slide forward, keeping overlap tokens of context
+
+    return chunks

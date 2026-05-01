@@ -93,6 +93,6 @@ class FAISSIndex:
         for dist, idx in zip(distances[0], indices[0]):
             if idx < len(self.chunks):
                 # Convert L2 distance to similarity (lower distance = higher similarity)
-                similarity = 1.0 / (1.0 + dist)
+                similarity = float(1.0 / (1.0 + float(dist)))
                 results.append((self.chunks[idx], round(similarity, 4)))
         return results
