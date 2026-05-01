@@ -12,13 +12,28 @@ from ai_engine import _load_word2vec, _sentence_vector_w2v, _tokenize
 
 _STOP = {"what", "who", "where", "when", "why", "how", "is", "are"}
 
+# Lazy SBERT model cache
+_sbert_model = None
+
+
+def _load_sbert():
+    global _sbert_model
+    if _sbert_model is None:
+        from sentence_transformers import SentenceTransformer
+        _sbert_model = SentenceTransformer("all-MiniLM-L6-v2")
+    return _sbert_model
+
 
 class FAISSIndex:
-    def __init__(self, cache_dir: str = ".faiss_cache"):
+    def __init__(self, cache_dir: str = ".faiss_cache", model_type: str = "glove"):
+        """
+        model_type: "glove" uses GloVe-50 word averaging (50-dim vectors).
+                    "sbert" uses all-MiniLM-L6-v2 sentence embeddings (384-dim vectors).
+        """
         self.cache_dir = cache_dir
+        self.model_type = model_type
         self.index = None
-        # each entry: {"text": str, "doc_name": str}
-        self.chunks_meta: list[dict] = []
+        self.chunks_meta: list[dict] = []  # [{"text": str, "doc_name": str}]
         os.makedirs(cache_dir, exist_ok=True)
 
     # --- hashing ---
@@ -29,17 +44,22 @@ class FAISSIndex:
 
     @staticmethod
     def multi_hash(texts: list[str]) -> str:
-        """Stable cache key for a set of documents (order-independent)."""
         hashes = sorted(FAISSIndex._hash(t) for t in texts)
         return hashlib.sha256("|".join(hashes).encode()).hexdigest()[:16]
 
     def _cache_paths(self, doc_hash: str) -> tuple[str, str]:
-        base = os.path.join(self.cache_dir, doc_hash)
+        # model_type in filename so glove and sbert caches don't collide
+        base = os.path.join(self.cache_dir, f"{doc_hash}_{self.model_type}")
         return f"{base}.index", f"{base}.pkl"
 
-    # --- build ---
+    # --- embedding ---
 
     def _embed(self, chunks_meta: list[dict]) -> np.ndarray:
+        if self.model_type == "sbert":
+            return self._embed_sbert(chunks_meta)
+        return self._embed_glove(chunks_meta)
+
+    def _embed_glove(self, chunks_meta: list[dict]) -> np.ndarray:
         model = _load_word2vec()
         vecs = [
             _sentence_vector_w2v(
@@ -50,14 +70,18 @@ class FAISSIndex:
         ]
         return np.array(vecs, dtype=np.float32)
 
+    def _embed_sbert(self, chunks_meta: list[dict]) -> np.ndarray:
+        model = _load_sbert()
+        texts = [cm["text"] for cm in chunks_meta]
+        vecs = model.encode(texts, show_progress_bar=False, batch_size=64)
+        return np.array(vecs, dtype=np.float32)
+
+    # --- build ---
+
     def build(self, chunks: list[str], doc_name: str = "doc") -> None:
-        """Single-doc convenience wrapper."""
         self.build_multi([(doc_name, chunks)])
 
     def build_multi(self, doc_chunks: list[tuple[str, list[str]]]) -> None:
-        """Build one index from multiple docs.
-        doc_chunks: [(doc_name, [chunk_text, ...]), ...]
-        """
         self.chunks_meta = [
             {"text": chunk, "doc_name": doc_name}
             for doc_name, chunks in doc_chunks
@@ -90,13 +114,17 @@ class FAISSIndex:
     # --- search ---
 
     def search(self, query: str, k: int = 3) -> list[tuple[str, str, float]]:
-        """Return top-k results as [(chunk_text, doc_name, score), ...]."""
+        """Return [(chunk_text, doc_name, score), ...]"""
         if self.index is None:
             raise ValueError("No index loaded")
 
-        model = _load_word2vec()
-        q_tokens = [w for w in _tokenize(query) if w.lower() not in _STOP]
-        q_vec = np.array([_sentence_vector_w2v(q_tokens, model)], dtype=np.float32)
+        if self.model_type == "sbert":
+            model = _load_sbert()
+            q_vec = np.array(model.encode([query]), dtype=np.float32)
+        else:
+            model = _load_word2vec()
+            q_tokens = [w for w in _tokenize(query) if w.lower() not in _STOP]
+            q_vec = np.array([_sentence_vector_w2v(q_tokens, model)], dtype=np.float32)
 
         distances, indices = self.index.search(q_vec, k)
         results = []

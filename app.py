@@ -47,37 +47,71 @@ if load_clicked:
         st.session_state["docs"] = docs
         st.session_state["combined_text"] = combined_text
 
-        with st.spinner("Building index..."):
-            idx = FAISSIndex()
-            cache_key = FAISSIndex.multi_hash([d["text"] for d in docs])
+        # Pre-compute chunks once for both indexes
+        doc_chunks = [
+            (d["name"], [c.text for c in chunk_text(d["text"], d["name"])])
+            for d in docs
+        ]
+        cache_key = FAISSIndex.multi_hash([d["text"] for d in docs])
 
-            if not idx.load(cache_key):
-                doc_chunks = [
-                    (d["name"], [c.text for c in chunk_text(d["text"], d["name"])])
-                    for d in docs
-                ]
-                idx.build_multi(doc_chunks)
-                idx.save(cache_key)
-                cache_status = "built"
+        # Build GloVe FAISS index
+        with st.spinner("Building GloVe index..."):
+            glove_idx = FAISSIndex(model_type="glove")
+            if not glove_idx.load(cache_key):
+                glove_idx.build_multi(doc_chunks)
+                glove_idx.save(cache_key)
+                glove_status = "built"
             else:
-                cache_status = "cached ✓"
+                glove_status = "cached ✓"
 
-        st.session_state["faiss_idx"] = idx
+        # Build SBERT index
+        with st.spinner("Building SBERT index (first run downloads ~90MB)..."):
+            sbert_idx = FAISSIndex(model_type="sbert")
+            if not sbert_idx.load(cache_key):
+                sbert_idx.build_multi(doc_chunks)
+                sbert_idx.save(cache_key)
+                sbert_status = "built"
+            else:
+                sbert_status = "cached ✓"
+
+        st.session_state["glove_idx"] = glove_idx
+        st.session_state["sbert_idx"] = sbert_idx
         st.session_state["index_info"] = {
-            "num_docs": len(idx.doc_names),
-            "num_chunks": idx.num_chunks,
-            "status": cache_status,
+            "num_docs": len(glove_idx.doc_names),
+            "num_chunks": glove_idx.num_chunks,
+            "glove": glove_status,
+            "sbert": sbert_status,
         }
 
 # --- index status bar ---
 if "index_info" in st.session_state:
     info = st.session_state["index_info"]
     st.caption(
-        f"📦 Index: {info['num_docs']} doc(s) | {info['num_chunks']} chunks | {info['status']}"
+        f"📦 {info['num_docs']} doc(s) | {info['num_chunks']} chunks | "
+        f"GloVe: {info['glove']} | SBERT: {info['sbert']}"
     )
 
 combined_text = st.session_state.get("combined_text", "")
-faiss_idx: FAISSIndex | None = st.session_state.get("faiss_idx")
+glove_idx: FAISSIndex | None = st.session_state.get("glove_idx")
+sbert_idx: FAISSIndex | None = st.session_state.get("sbert_idx")
+
+
+def _render_faiss_result(results: list, label: str) -> None:
+    """Shared renderer for FAISS/SBERT results."""
+    if not results:
+        st.warning("No result.")
+        return
+    top_text, top_doc, top_score = results[0]
+    st.success(top_text)
+    st.progress(min(top_score, 1.0), text=f"Score: {top_score:.4f}")
+    st.caption(f"Source: **{top_doc}**")
+    if len(results) > 1:
+        with st.expander(f"Neighbor chunks ({len(results) - 1})"):
+            for nb_text, nb_doc, nb_score in results[1:]:
+                st.write(nb_text)
+                st.caption(f"{nb_doc} | {nb_score:.4f}")
+                st.divider()
+
 
 if combined_text:
     docs = st.session_state.get("docs", [])
@@ -89,9 +123,9 @@ if combined_text:
     question = st.text_input("Ask a question about the document:")
     method = st.radio(
         "Search method:",
-        ["bow", "bm25", "word2vec", "faiss"],
+        ["word2vec", "faiss", "sbert"],
         horizontal=True,
-        help="BoW | BM25 | Word2Vec | FAISS (vector index, fast for long docs)",
+        help="Word2Vec = GloVe sentence avg | FAISS = GloVe + vector index | SBERT = sentence embeddings",
     )
     compare = st.checkbox("Compare all methods side by side")
 
@@ -100,85 +134,61 @@ if combined_text:
             st.warning("Please enter a question.")
 
         elif compare:
-            col_a, col_b, col_c, col_d = st.columns(4)
+            col_a, col_b, col_c = st.columns(3)
 
             with col_a:
-                st.markdown("**🔤 BM25**")
-                ans, conf, dbg = answer_question(combined_text, question, method="bm25")
-                st.success(ans)
-                if conf > 0:
-                    st.progress(conf, text=f"Confidence: {int(conf * 100)}%")
-                st.caption(f"Score: {dbg.get('raw_score', 0):.4f}")
-
-            with col_b:
-                st.markdown("**📐 Bag of Words**")
-                ans, conf, dbg = answer_question(combined_text, question, method="bow")
-                st.success(ans)
-                if conf > 0:
-                    st.progress(conf, text=f"Confidence: {int(conf * 100)}%")
-                st.caption(f"Cosine: {dbg.get('raw_score', 0):.4f}")
-
-            with col_c:
                 st.markdown("**🧠 Word2Vec**")
                 with st.spinner("Loading model..."):
-                    ans, conf, dbg = answer_question(combined_text, question, method="word2vec")
+                    ans, conf, dbg = answer_question(combined_text, question)
                 st.success(ans)
                 if conf > 0:
                     st.progress(conf, text=f"Confidence: {int(conf * 100)}%")
                 st.caption(f"Cosine: {dbg.get('raw_score', 0):.4f}")
 
-            with col_d:
-                st.markdown("**⚡ FAISS**")
-                if faiss_idx:
-                    results = faiss_idx.search(question, k=2)
-                    if results:
-                        top_text, top_doc, top_score = results[0]
-                        st.success(top_text)
-                        st.progress(min(top_score, 1.0), text=f"Score: {top_score:.4f}")
-                        st.caption(f"Source: {top_doc}")
-                        if len(results) > 1:
-                            nb_text, nb_doc, nb_score = results[1]
-                            with st.expander("Neighbor"):
-                                st.write(nb_text)
-                                st.caption(f"{nb_doc} | {nb_score:.4f}")
-                    else:
-                        st.warning("No result.")
+            with col_b:
+                st.markdown("**⚡ FAISS (GloVe)**")
+                if glove_idx:
+                    results = glove_idx.search(question, k=2)
+                    _render_faiss_result(results, "FAISS")
+                else:
+                    st.warning("Load a document first.")
+
+            with col_c:
+                st.markdown("**🚀 SBERT**")
+                if sbert_idx:
+                    with st.spinner("Searching..."):
+                        results = sbert_idx.search(question, k=2)
+                    _render_faiss_result(results, "SBERT")
                 else:
                     st.warning("Load a document first.")
 
         else:
-            if method == "faiss":
-                if faiss_idx:
-                    with st.spinner("Searching..."):
-                        results = faiss_idx.search(question, k=3)
-                    if results:
-                        top_text, top_doc, top_score = results[0]
-                        st.success(f"**Answer:** {top_text}")
-                        st.progress(min(top_score, 1.0), text=f"Score: {top_score:.4f}")
-                        st.caption(f"Source: **{top_doc}**")
-                        if len(results) > 1:
-                            with st.expander(f"Neighbor chunks ({len(results) - 1})"):
-                                for nb_text, nb_doc, nb_score in results[1:]:
-                                    st.write(nb_text)
-                                    st.caption(f"{nb_doc} | {nb_score:.4f}")
-                                    st.divider()
-                    else:
-                        st.warning("No relevant chunk found.")
-                else:
-                    st.warning("Load a document first.")
-            else:
+            if method == "word2vec":
                 with st.spinner("Finding answer..."):
-                    answer, confidence, debug = answer_question(
-                        combined_text, question, method=method
-                    )
+                    answer, confidence, debug = answer_question(combined_text, question)
                 st.success(f"**Answer:** {answer}")
                 if confidence > 0:
                     st.progress(confidence, text=f"Confidence: {int(confidence * 100)}%")
                 else:
                     st.warning("Low relevance — try rephrasing.")
-                st.caption(
-                    f"Method: {debug.get('method', '')} | "
-                    f"Score: {debug.get('raw_score', debug.get('score', 0)):.4f}"
-                )
+                st.caption(f"Method: word2vec | Score: {debug.get('raw_score', 0):.4f}")
+
+            elif method == "faiss":
+                if glove_idx:
+                    with st.spinner("Searching..."):
+                        results = glove_idx.search(question, k=3)
+                    st.markdown("**⚡ FAISS (GloVe)**")
+                    _render_faiss_result(results, "FAISS")
+                else:
+                    st.warning("Load a document first.")
+
+            elif method == "sbert":
+                if sbert_idx:
+                    with st.spinner("Searching..."):
+                        results = sbert_idx.search(question, k=3)
+                    st.markdown("**🚀 SBERT**")
+                    _render_faiss_result(results, "SBERT")
+                else:
+                    st.warning("Load a document first.")
 else:
     st.info("Upload a file or paste text, then click Load.")
