@@ -109,8 +109,14 @@ class Index:
 
     # --- search ---
 
-    def search(self, query: str, k: int = 3) -> list[dict]:
-        """Return top-k results as [{"text": str, "doc_name": str, "score": float}]."""
+    def search(
+        self, query: str, k: int = 3, return_indices: bool = False
+    ) -> list[dict]:
+        """Return top-k results as [{"text": str, "doc_name": str, "score": float}].
+
+        return_indices=True adds "_idx" (corpus position) to each result —
+        used by HybridRetriever for RRF fusion.
+        """
         if self.faiss_index is None:
             raise ValueError("Index not loaded.")
 
@@ -126,7 +132,10 @@ class Index:
             if 0 <= idx < len(self.chunks_meta):
                 # IP on normalized vectors is in [-1, 1]; map to [0, 1]
                 score = round((float(dist) + 1.0) / 2.0, 4)
-                results.append({**self.chunks_meta[idx], "score": score})
+                result = {**self.chunks_meta[idx], "score": score}
+                if return_indices:
+                    result["_idx"] = int(idx)
+                results.append(result)
         return results
 
     # --- info ---

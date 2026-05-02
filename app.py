@@ -19,6 +19,7 @@ load_dotenv(_root / ".env")
 from core.parser import parse_file
 from core.chunker import chunk_text
 from core.index import Index
+from core.hybrid import HybridRetriever
 from core.llm import generate_answer
 
 
@@ -416,10 +417,15 @@ if load_clicked:
             else:
                 idx_status = "cached ✓"
 
+        with st.spinner("Building BM25 index…"):
+            retriever = HybridRetriever(idx)
+            retriever.build_bm25()
+
         st.session_state.update({
             "docs": docs,
             "combined_text": "\n\n".join(d["text"] for d in docs),
             "idx": idx,
+            "retriever": retriever,
             "idx_info": {
                 "num_docs": len(idx.doc_names),
                 "num_chunks": idx.num_chunks,
@@ -433,12 +439,13 @@ if load_clicked:
 
 # ── State ─────────────────────────────────────────────────────────────────────
 idx: Index | None = st.session_state.get("idx")
+retriever: HybridRetriever | None = st.session_state.get("retriever")
 docs = st.session_state.get("docs", [])
 combined_text = st.session_state.get("combined_text", "")
 
 
 # ── Chat section ──────────────────────────────────────────────────────────────
-if combined_text and idx:
+if combined_text and idx and retriever:
 
     # auto-scroll to here after fresh load
     if st.session_state.get("_scroll_to_chat"):
@@ -492,7 +499,10 @@ if combined_text and idx:
                 with st.expander(f"📚 Sources — top match {top_score}%", expanded=False):
                     for r in msg["sources"]:
                         st.markdown(f"> {r['text']}")
-                        st.caption(f"**{r['doc_name']}** · {int(r['score'] * 100)}% relevance")
+                        st.caption(
+                            f"**{r['doc_name']}** · {r.get('source', '')} · "
+                            f"RRF {r['score']:.4f}"
+                        )
                         st.divider()
 
     # new question
@@ -501,7 +511,7 @@ if combined_text and idx:
         _user_bubble(question)
 
         with st.spinner("Thinking…"):
-            results = idx.search(question, k=3)
+            results = retriever.search(question, k=5)
 
             if not results:
                 answer = "I couldn't find relevant content in the document for that question."
@@ -534,7 +544,10 @@ if combined_text and idx:
             with st.expander(f"📚 Sources — top match {top_score}%", expanded=False):
                 for r in sources:
                     st.markdown(f"> {r['text']}")
-                    st.caption(f"**{r['doc_name']}** · {int(r['score'] * 100)}% relevance")
+                    st.caption(
+                        f"**{r['doc_name']}** · {r.get('source', '')} · "
+                        f"RRF {r['score']:.4f}"
+                    )
                     st.divider()
 
 else:

@@ -49,9 +49,13 @@ def generate_answer(
         "content": f"Relevant document context for the current question:\n\n{context}",
     })
 
-    # last N turns so follow-up questions resolve correctly
+    # last N turns — strip any extra keys (e.g. "sources") Groq doesn't accept
     if history:
-        messages.extend(history[-(_HISTORY_TURNS * 2):])
+        clean = [
+            {"role": m["role"], "content": m["content"]}
+            for m in history[-(_HISTORY_TURNS * 2):]
+        ]
+        messages.extend(clean)
 
     messages.append({"role": "user", "content": question})
 
