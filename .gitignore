@@ -22,3 +22,8 @@ Thumbs.db
 data/
 *.docx
 .github
+
+# Secrets (never commit real keys)
+.env
+.env.test
+.env.local

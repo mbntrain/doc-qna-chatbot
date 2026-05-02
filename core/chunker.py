@@ -4,10 +4,6 @@ Walks the doc as a flat token stream and emits fixed-size windows with
 overlap so context isn't lost at the seams. When a paragraph break
 falls inside the last 20% of a window, snap the cut there instead of
 the hard token limit so chunks read more naturally.
-
-Each chunk carries metadata (id, doc name, token offsets) so the FAISS
-layer can return matched chunk + neighbors and support multi-doc
-indexing.
 """
 import re
 from dataclasses import dataclass
@@ -31,7 +27,6 @@ def _tokenize(text: str) -> list[str]:
 
 
 def _paragraph_token_positions(text: str) -> list[int]:
-    """Cumulative token index at the end of each paragraph."""
     cursor = 0
     breaks = []
     for para in _PARA_SPLIT_RE.split(text):
@@ -41,13 +36,9 @@ def _paragraph_token_positions(text: str) -> list[int]:
 
 
 def chunk_text(text: str, doc_name: str,
-                   chunk_size: int = 300,
-                   overlap: int = 50) -> list[Chunk]:
-    """Split a document into overlapping fixed-size token chunks.
-
-    chunk_size: target tokens per chunk (hard upper bound).
-    overlap:    tokens carried over from the previous chunk.
-    """
+               chunk_size: int = 300,
+               overlap: int = 50) -> list[Chunk]:
+    """Split a document into overlapping fixed-size token chunks."""
     if chunk_size <= overlap:
         raise ValueError(f"chunk_size ({chunk_size}) must exceed overlap ({overlap})")
 
@@ -63,7 +54,6 @@ def chunk_text(text: str, doc_name: str,
     while pos < len(tokens):
         end = min(pos + chunk_size, len(tokens))
 
-        # snap to a paragraph boundary if one falls in the soft zone (last 20%)
         soft_zone_start = pos + int(chunk_size * 0.8)
         for pb in para_breaks:
             if soft_zone_start <= pb <= end:
@@ -81,6 +71,6 @@ def chunk_text(text: str, doc_name: str,
 
         if end >= len(tokens):
             break
-        pos = end - overlap  # slide forward, keeping overlap tokens of context
+        pos = end - overlap
 
     return chunks

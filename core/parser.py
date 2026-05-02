@@ -3,7 +3,7 @@ from docx import Document
 
 
 def parse_file(file) -> str:
-    """Extract text from uploaded file. Returns error message on failure."""
+    """Extract text from an uploaded Streamlit file object."""
     name = file.name.lower()
 
     try:
@@ -24,6 +24,6 @@ def parse_file(file) -> str:
 
     text = text.strip()
     if not text:
-        raise ValueError(f"No readable text found in {file.name}. The file may be empty or scanned.")
+        raise ValueError(f"No readable text in {file.name} — may be empty or scanned.")
 
     return text
