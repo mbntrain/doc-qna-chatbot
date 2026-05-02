@@ -1,25 +1,37 @@
-import re
+import base64
 import html
 from pathlib import Path
 
+from PIL import Image as _PILImage
 import streamlit as st
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
+_root = Path(__file__).resolve().parent
+_assets = _root / "assets"
+_sift_icon_path = _assets / "sift_icon.png"
+_sift_icon = _PILImage.open(_sift_icon_path)
+
+
+def _asset_data_uri(filename: str) -> str:
+    path = _assets / filename
+    raw = path.read_bytes()
+    b64 = base64.b64encode(raw).decode("ascii")
+    return f"data:image/png;base64,{b64}"
+
+
+_ICON_DATA_URI = _asset_data_uri("sift_icon.png")
+
 st.set_page_config(
-    page_title="Jay — AI Doc Q&A",
-    page_icon="🤖",
+    page_title="Sift — Retrieval that reasons",
+    page_icon=_sift_icon,
     initial_sidebar_state="collapsed",
 )
-
-_root = Path(__file__).resolve().parent
 load_dotenv(_root / ".env.test")
 load_dotenv(_root / ".env")
 
 from core.parser import parse_file
-from core.chunker import chunk_text
-from core.index import Index
-from core.hybrid import HybridRetriever
+from core.sentence_window import SentenceWindowRetriever
 from core.llm import generate_answer
 
 
@@ -55,35 +67,13 @@ st.markdown("""
     padding-bottom: 5rem !important;
 }
 
-/* ── Title ── */
-.jay-logo {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 4px;
-}
-.jay-logo-icon {
-    width: 44px; height: 44px;
-    border-radius: 14px;
-    background: linear-gradient(135deg, #4f46e5 0%, #a855f7 100%);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 22px;
-    box-shadow: 0 4px 14px rgba(79,70,229,0.4);
-}
-.jay-logo-text {
-    font-size: 28px;
-    font-weight: 800;
-    letter-spacing: -0.8px;
-    background: linear-gradient(135deg, #4f46e5, #a855f7);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-.jay-tagline {
-    font-size: 13px;
-    color: #94a3b8;
-    margin: 0 0 24px 56px;
-    font-weight: 400;
+/* ── Brand ── */
+.sift-tagline {
+    font-size: 14px;
+    color: #64748b;
+    margin: -8px 0 28px 2px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
 }
 
 /* ── Upload area ── */
@@ -217,12 +207,18 @@ st.markdown("""
 .ai-avatar {
     width: 32px; height: 32px;
     border-radius: 50%;
-    background: linear-gradient(135deg, #4f46e5, #a855f7);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 15px;
     flex-shrink: 0;
     margin-top: 3px;
-    box-shadow: 0 2px 8px rgba(79,70,229,0.35);
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(79,70,229,0.25);
+    border: 1px solid #e0e7ff;
+    background: #fff;
+}
+.ai-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
 }
 
 .bubble-user {
@@ -309,7 +305,12 @@ details[data-testid="stExpander"] {
     padding: 52px 0 32px;
     color: #94a3b8;
 }
-.empty-state .icon { font-size: 46px; margin-bottom: 14px; }
+.empty-state .icon-wrap {
+    margin: 0 auto 14px;
+    width: 56px;
+    height: 56px;
+}
+.empty-state .icon-wrap img { width: 100%; height: 100%; object-fit: contain; }
 .empty-state h3 { font-size: 17px; font-weight: 600; color: #64748b; margin: 0 0 6px; }
 .empty-state p  { font-size: 13px; margin: 0; line-height: 1.65; }
 
@@ -322,16 +323,6 @@ details[data-testid="stExpander"] {
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-def _units(text: str, doc_name: str) -> list[str]:
-    sentences = [
-        s.strip()
-        for s in re.split(r"(?<=[.!?])\s+", text.strip())
-        if len(s.strip()) > 10
-    ]
-    if len(sentences) >= 2:
-        return sentences
-    chunks = [c.text for c in chunk_text(text, doc_name, chunk_size=120, overlap=30)]
-    return chunks or [text.strip()]
 
 
 def _user_bubble(content: str) -> None:
@@ -346,20 +337,18 @@ def _ai_bubble(content: str) -> None:
     body = _md_to_html(content)
     st.markdown(f"""
     <div class="chat-row ai">
-      <div class="ai-avatar">🤖</div>
+      <div class="ai-avatar"><img src="{_ICON_DATA_URI}" alt="" /></div>
       <div class="bubble-ai">{body}</div>
     </div>
     """, unsafe_allow_html=True)
 
 
 # ── Header ────────────────────────────────────────────────────────────────────
-st.markdown("""
-<div class="jay-logo">
-  <div class="jay-logo-icon">🤖</div>
-  <div class="jay-logo-text">Jay</div>
-</div>
-<div class="jay-tagline">AI-powered doc Q&amp;A · Upload, ask, understand.</div>
-""", unsafe_allow_html=True)
+st.image(str(_assets / "sift_logo.png"), width=320)
+st.markdown(
+    '<p class="sift-tagline">Retrieval that reasons.</p>',
+    unsafe_allow_html=True,
+)
 
 
 # ── Upload section (original layout kept exactly) ────────────────────────────
@@ -402,33 +391,27 @@ if load_clicked:
         st.error("Upload a file or paste text first.")
 
     if docs:
-        doc_chunks = [(d["name"], _units(d["text"], d["name"])) for d in docs]
-        cache_material = [
-            f"{name}\n" + "\n".join(units) for name, units in doc_chunks
-        ]
-        cache_key = Index.content_hash(cache_material + ["sbert-v1"])
+        raw_docs = [(d["name"], d["text"]) for d in docs]
+        cache_key = SentenceWindowRetriever.content_hash(
+            [f"{name}\n{text}" for name, text in raw_docs] + ["sw-v1"]
+        )
 
         with st.spinner("Building index… (first run downloads ~90 MB)"):
-            idx = Index()
-            if not idx.load(cache_key):
-                idx.build(doc_chunks)
-                idx.save(cache_key)
+            retriever = SentenceWindowRetriever()
+            if not retriever.load(cache_key):
+                retriever.build(raw_docs)
+                retriever.save(cache_key)
                 idx_status = "built"
             else:
                 idx_status = "cached ✓"
 
-        with st.spinner("Building BM25 index…"):
-            retriever = HybridRetriever(idx)
-            retriever.build_bm25()
-
         st.session_state.update({
             "docs": docs,
             "combined_text": "\n\n".join(d["text"] for d in docs),
-            "idx": idx,
             "retriever": retriever,
             "idx_info": {
-                "num_docs": len(idx.doc_names),
-                "num_chunks": idx.num_chunks,
+                "num_docs": len(retriever.doc_names),
+                "num_chunks": retriever.num_sentences,
                 "status": idx_status,
             },
             "messages": [],
@@ -438,14 +421,13 @@ if load_clicked:
 
 
 # ── State ─────────────────────────────────────────────────────────────────────
-idx: Index | None = st.session_state.get("idx")
-retriever: HybridRetriever | None = st.session_state.get("retriever")
+retriever: SentenceWindowRetriever | None = st.session_state.get("retriever")
 docs = st.session_state.get("docs", [])
 combined_text = st.session_state.get("combined_text", "")
 
 
 # ── Chat section ──────────────────────────────────────────────────────────────
-if combined_text and idx and retriever:
+if combined_text and retriever:
 
     # auto-scroll to here after fresh load
     if st.session_state.get("_scroll_to_chat"):
@@ -495,14 +477,13 @@ if combined_text and idx and retriever:
             _ai_bubble(msg["content"])
             # render stored sources for this turn if available
             if msg.get("sources"):
-                top_score = int(msg["sources"][0]["score"] * 100)
-                with st.expander(f"📚 Sources — top match {top_score}%", expanded=False):
-                    for r in msg["sources"]:
-                        st.markdown(f"> {r['text']}")
-                        st.caption(
-                            f"**{r['doc_name']}** · {r.get('source', '')} · "
-                            f"RRF {r['score']:.4f}"
-                        )
+                best = msg["sources"][0]["score"] or 1
+                with st.expander("📚 Sources", expanded=False):
+                    for i, r in enumerate(msg["sources"], 1):
+                        pct = int((r["score"] / best) * 100)
+                        matched = r.get("matched_sentence") or r.get("text", "")
+                        st.caption(f"#{i} · **{r['doc_name']}** · {r.get('source', '')} · {pct}% relevance")
+                        st.info(matched)
                         st.divider()
 
     # new question
@@ -511,13 +492,15 @@ if combined_text and idx and retriever:
         _user_bubble(question)
 
         with st.spinner("Thinking…"):
-            results = retriever.search(question, k=5)
+            results = retriever.search(question, k=3)
 
             if not results:
                 answer = "I couldn't find relevant content in the document for that question."
                 sources = []
             else:
-                context_chunks = [r["text"] for r in results]
+                # Pass window context to LLM (matched sentence + neighbours),
+                # but cap each chunk to avoid flooding the prompt.
+                context_chunks = [r["text"][:600] for r in results]
                 sources = results
                 try:
                     answer = generate_answer(
@@ -540,20 +523,21 @@ if combined_text and idx and retriever:
         })
 
         if sources:
-            top_score = int(sources[0]["score"] * 100)
-            with st.expander(f"📚 Sources — top match {top_score}%", expanded=False):
+            best = sources[0]["score"] or 1
+            with st.expander("📚 Sources", expanded=False):
                 for r in sources:
+                    pct = int((r["score"] / best) * 100)
                     st.markdown(f"> {r['text']}")
                     st.caption(
                         f"**{r['doc_name']}** · {r.get('source', '')} · "
-                        f"RRF {r['score']:.4f}"
+                        f"relevance {pct}%"
                     )
                     st.divider()
 
 else:
-    st.markdown("""
+    st.markdown(f"""
     <div class="empty-state">
-      <div class="icon">📄</div>
+      <div class="icon-wrap"><img src="{_ICON_DATA_URI}" alt="" /></div>
       <h3>No document loaded yet</h3>
       <p>Upload a PDF, DOCX, or TXT above — or paste text —<br>then click <strong>Load</strong> to start the conversation.</p>
     </div>

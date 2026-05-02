@@ -1,4 +1,4 @@
-"""LLM interface — Phase 5 (Conversational RAG).
+"""LLM interface for Sift (conversational RAG).
 
 Thin wrapper around Groq so the provider is swappable.
 Reads GROQ_API_KEY from environment (.env file).
@@ -36,17 +36,20 @@ def generate_answer(
 
     context = "\n\n---\n\n".join(context_chunks)
     system_prompt = (
-        "You are a helpful assistant that answers questions strictly based on "
-        "the provided document context. If the answer is not in the context, "
-        "say so clearly. Do not fabricate information."
+        "You are a precise, concise assistant. "
+        "Answer ONLY using the provided document context. "
+        "Be direct — 1 to 4 sentences unless the question genuinely requires more. "
+        "If the answer includes a formula or equation, write it out clearly. "
+        "If the answer is not in the context, say so in one sentence. "
+        "Never repeat or paraphrase large portions of the context."
     )
 
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
 
-    # inject retrieved context as a system-level note before history
+    # inject retrieved context before history so it's always visible to the LLM
     messages.append({
         "role": "system",
-        "content": f"Relevant document context for the current question:\n\n{context}",
+        "content": f"Document context:\n\n{context}",
     })
 
     # last N turns — strip any extra keys (e.g. "sources") Groq doesn't accept
