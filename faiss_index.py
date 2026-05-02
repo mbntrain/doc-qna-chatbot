@@ -49,7 +49,7 @@ class FAISSIndex:
 
     def _cache_paths(self, doc_hash: str) -> tuple[str, str]:
         # model_type in filename so glove and sbert caches don't collide
-        base = os.path.join(self.cache_dir, f"{doc_hash}_{self.model_type}")
+        base = os.path.join(self.cache_dir, f"{doc_hash}_{self.model_type}_v2")
         return f"{base}.index", f"{base}.pkl"
 
     # --- embedding ---
@@ -73,7 +73,7 @@ class FAISSIndex:
     def _embed_sbert(self, chunks_meta: list[dict]) -> np.ndarray:
         model = _load_sbert()
         texts = [cm["text"] for cm in chunks_meta]
-        vecs = model.encode(texts, show_progress_bar=False, batch_size=64)
+        vecs = model.encode(texts, show_progress_bar=False, batch_size=64, normalize_embeddings=True)
         return np.array(vecs, dtype=np.float32)
 
     # --- build ---
@@ -88,7 +88,10 @@ class FAISSIndex:
             for chunk in chunks
         ]
         embeddings = self._embed(self.chunks_meta)
-        self.index = faiss.IndexFlatL2(embeddings.shape[1])
+        if self.model_type == "sbert":
+            self.index = faiss.IndexFlatIP(embeddings.shape[1])
+        else:
+            self.index = faiss.IndexFlatL2(embeddings.shape[1])
         self.index.add(embeddings)
 
     # --- persist ---
@@ -120,7 +123,7 @@ class FAISSIndex:
 
         if self.model_type == "sbert":
             model = _load_sbert()
-            q_vec = np.array(model.encode([query]), dtype=np.float32)
+            q_vec = np.array(model.encode([query], normalize_embeddings=True), dtype=np.float32)
         else:
             model = _load_word2vec()
             q_tokens = [w for w in _tokenize(query) if w.lower() not in _STOP]
@@ -130,7 +133,10 @@ class FAISSIndex:
         results = []
         for dist, idx in zip(distances[0], indices[0]):
             if 0 <= idx < len(self.chunks_meta):
-                score = round(1.0 / (1.0 + float(dist)), 4)
+                if self.model_type == "sbert":
+                    score = round((float(dist) + 1.0) / 2.0, 4)  # IP on normalized vectors: [-1,1] -> [0,1]
+                else:
+                    score = round(1.0 / (1.0 + float(dist)), 4)
                 cm = self.chunks_meta[idx]
                 results.append((cm["text"], cm["doc_name"], score))
         return results

@@ -1,8 +1,29 @@
 import streamlit as st
+import re
 from file_parser import parse_file
 from ai_engine import answer_question
 from chunker import chunk_text
 from faiss_index import FAISSIndex
+
+
+def _split_sentences(text: str) -> list[str]:
+    return [
+        s.strip()
+        for s in re.split(r"(?<=[.!?])\s+", text.strip())
+        if len(s.strip()) > 10
+    ]
+
+
+def _units_for_doc(text: str, doc_name: str) -> list[str]:
+    # Prefer sentence-level units for better precision on ambiguous terms (e.g., bank/shore/loan).
+    sentences = _split_sentences(text)
+    if len(sentences) >= 2:
+        return sentences
+
+    chunks = [c.text for c in chunk_text(text, doc_name, chunk_size=120, overlap=30)]
+    if chunks:
+        return chunks
+    return [text.strip()]
 
 st.title("Jay — AI Doc Q&A Chatbot")
 
@@ -49,10 +70,14 @@ if load_clicked:
 
         # Pre-compute chunks once for both indexes
         doc_chunks = [
-            (d["name"], [c.text for c in chunk_text(d["text"], d["name"])])
+            (d["name"], _units_for_doc(d["text"], d["name"]))
             for d in docs
         ]
-        cache_key = FAISSIndex.multi_hash([d["text"] for d in docs])
+        cache_material = [
+            f"{name}\n" + "\n".join(units)
+            for name, units in doc_chunks
+        ]
+        cache_key = FAISSIndex.multi_hash(cache_material + ["retrieval-v2"])
 
         # Build GloVe FAISS index
         with st.spinner("Building GloVe index..."):
@@ -120,16 +145,18 @@ if combined_text:
     )
     st.text_area("Document Preview", docs[0]["text"], height=200, disabled=True)
 
-    question = st.text_input("Ask a question about the document:")
-    method = st.radio(
-        "Search method:",
-        ["word2vec", "faiss", "sbert"],
-        horizontal=True,
-        help="Word2Vec = GloVe sentence avg | FAISS = GloVe + vector index | SBERT = sentence embeddings",
-    )
-    compare = st.checkbox("Compare all methods side by side")
+    with st.form("qa_form", clear_on_submit=False):
+        question = st.text_input("Ask a question about the document:")
+        method = st.radio(
+            "Search method:",
+            ["word2vec", "faiss", "sbert"],
+            horizontal=True,
+            help="Word2Vec = GloVe sentence avg | FAISS = GloVe + vector index | SBERT = sentence embeddings",
+        )
+        compare = st.checkbox("Compare all methods side by side")
+        ask_clicked = st.form_submit_button("Get Answer")
 
-    if st.button("Get Answer"):
+    if ask_clicked:
         if not question.strip():
             st.warning("Please enter a question.")
 
