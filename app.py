@@ -7,6 +7,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
+# ── Paths & assets ────────────────────────────────────────────────────────────
 _root = Path(__file__).resolve().parent
 _assets = _root / "assets"
 _sift_icon_path = _assets / "sift_icon.png"
@@ -14,17 +15,18 @@ _sift_icon = _PILImage.open(_sift_icon_path)
 
 
 def _asset_data_uri(filename: str) -> str:
-    path = _assets / filename
-    raw = path.read_bytes()
-    b64 = base64.b64encode(raw).decode("ascii")
-    return f"data:image/png;base64,{b64}"
+    raw = (_assets / filename).read_bytes()
+    return f"data:image/png;base64,{base64.b64encode(raw).decode('ascii')}"
 
 
 _ICON_DATA_URI = _asset_data_uri("sift_icon.png")
+_LOGO_DATA_URI = _asset_data_uri("sift_logo.png")
 
+# ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Sift — Retrieval that reasons",
+    page_title="Sift — ask questions, get grounded answers",
     page_icon=_sift_icon,
+    layout="wide",
     initial_sidebar_state="collapsed",
 )
 load_dotenv(_root / ".env.test")
@@ -34,297 +36,505 @@ from core.parser import parse_file
 from core.sentence_window import SentenceWindowRetriever
 from core.llm import generate_answer
 
+# streamlit-extras: a real wrapper around widgets (raw HTML divs can't contain them)
+try:
+    from streamlit_extras.stylable_container import stylable_container
+except ImportError:
+    from contextlib import contextmanager
 
-# ── Markdown → HTML for AI bubble rendering ───────────────────────────────────
+    @contextmanager
+    def stylable_container(key, css_styles):  # graceful fallback
+        yield
+
+
 def _md_to_html(text: str) -> str:
     try:
         import markdown as _md
-        return _md.markdown(
-            text,
-            extensions=["fenced_code", "tables", "nl2br"],
-        )
+        return _md.markdown(text, extensions=["fenced_code", "tables", "nl2br"])
     except Exception:
         return html.escape(text).replace("\n", "<br>")
 
 
-# ── Premium CSS ───────────────────────────────────────────────────────────────
+# ── CSS ───────────────────────────────────────────────────────────────────────
+# Palette — locked, used everywhere:
+#   ink     #0F1117   navy text / dark surfaces (matches logo background)
+#   paper   #FAF7F0   page background (cream)
+#   paper2  #F2EDDF   inset surfaces
+#   line    #E8E2D2   borders
+#   amber   #F5A524   primary accent (matches logo bars)
+#   amber-d #D88A0E   accent hover
+#   cream   #FFFDF7   cards
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 
-*, body, [class*="css"] {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+:root {
+  --ink: #0F1117;
+  --ink-2: #1B1F2A;
+  --paper: #FAF7F0;
+  --paper-2: #F2EDDF;
+  --line: #E8E2D2;
+  --line-2: #D9D2BD;
+  --amber: #F5A524;
+  --amber-d: #D88A0E;
+  --amber-soft: #FCEBC4;
+  --cream: #FFFDF7;
+  --muted: #6B6F7C;
+  --muted-2: #8B8F9C;
+  --ok: #2F8F5C;
 }
 
-/* Page */
+html, body, [class*="css"], [class*="st-"] {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+  color: var(--ink);
+}
+
+/* ── Page surface ───────────────────────────────────────────────────────── */
 [data-testid="stAppViewContainer"],
-[data-testid="stMain"] {
-    background: #f0f2f8 !important;
+[data-testid="stMain"],
+.stApp {
+  background:
+    radial-gradient(ellipse at 50% -10%, rgba(245,165,36,0.06) 0%, transparent 55%),
+    var(--paper) !important;
 }
 .block-container {
-    max-width: 800px !important;
-    padding-top: 2.5rem !important;
-    padding-bottom: 5rem !important;
+  max-width: 880px !important;
+  padding-top: 2.4rem !important;
+  padding-bottom: 6rem !important;
 }
 
-/* ── Brand ── */
-.sift-tagline {
-    font-size: 14px;
-    color: #64748b;
-    margin: -8px 0 28px 2px;
-    font-weight: 500;
-    letter-spacing: 0.02em;
+/* ── Top accent rail (single warm hairline) ─────────────────────────────── */
+.top-rail {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent 0%, var(--amber) 35%, var(--amber-d) 65%, transparent 100%);
+  z-index: 9999;
+  opacity: 0.85;
 }
 
-/* ── Upload area ── */
+/* ── Brand header ───────────────────────────────────────────────────────── */
+.sift-head { display: flex; align-items: flex-start; gap: 18px; margin: 4px 0 6px; }
+.sift-head img.logo { height: 64px; width: auto; }
+.lede {
+  font-size: 14px;
+  color: var(--muted);
+  line-height: 1.55;
+  max-width: 640px;
+  margin: 6px 0 0 0;
+  font-weight: 400;
+}
+.lede b { color: var(--ink); font-weight: 600; }
+.sift-chips { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
+.sift-chip {
+  background: var(--cream);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+.sift-chip.warm { background: var(--amber-soft); border-color: #f3d98c; color: #6a4a07; }
+.sift-chip.dim  { color: var(--muted); }
+
+/* ── Section caption (small uppercase) ──────────────────────────────────── */
+.sec-cap {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--muted-2);
+  margin: 22px 0 10px 2px;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   FILE UPLOADER — single border, no nested rectangles.
+   Strip the outer wrapper border, style only the inner dropzone.
+   ────────────────────────────────────────────────────────────────────────── */
 [data-testid="stFileUploader"] {
-    background: white !important;
-    border: 1.5px dashed #c7d2fe !important;
-    border-radius: 14px !important;
-    padding: 6px 10px !important;
-    transition: border-color 0.2s;
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
 }
-[data-testid="stFileUploader"]:hover {
-    border-color: #6366f1 !important;
+[data-testid="stFileUploader"] section,
+[data-testid="stFileUploaderDropzone"] {
+  background: var(--paper-2) !important;
+  border: 1.5px dashed var(--line-2) !important;
+  border-radius: 12px !important;
+  padding: 18px 16px !important;
+  transition: border-color 0.18s ease, background 0.18s ease;
 }
-[data-testid="stFileUploader"] label { color: #374151 !important; font-weight: 500 !important; }
+[data-testid="stFileUploader"] section:hover,
+[data-testid="stFileUploaderDropzone"]:hover {
+  border-color: var(--amber) !important;
+  background: var(--amber-soft) !important;
+}
+[data-testid="stFileUploader"] label {
+  color: var(--ink) !important;
+  font-weight: 600 !important;
+  font-size: 13.5px !important;
+}
+[data-testid="stFileUploader"] small,
+[data-testid="stFileUploader"] [data-testid="stFileUploaderDropzoneInstructions"] span {
+  color: var(--muted) !important;
+}
 [data-testid="stFileUploader"] button {
-    border-radius: 8px !important;
-    border-color: #e0e7ff !important;
-    color: #4f46e5 !important;
-    font-weight: 500 !important;
+  background: var(--cream) !important;
+  border: 1px solid var(--line-2) !important;
+  border-radius: 8px !important;
+  color: var(--ink) !important;
+  font-weight: 600 !important;
+  font-size: 12.5px !important;
+  padding: 6px 14px !important;
+  box-shadow: none !important;
+}
+[data-testid="stFileUploader"] button:hover {
+  border-color: var(--amber) !important;
+  color: var(--amber-d) !important;
+  background: #FFF8E6 !important;
+}
+[data-testid="stFileUploader"] [data-testid="stFileUploaderFile"] {
+  background: var(--cream) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 10px !important;
+  margin-top: 8px !important;
 }
 
-/* Paste textarea */
+/* ──────────────────────────────────────────────────────────────────────────
+   TEXT AREA — same logic. One border, no doubles.
+   Outer wrapper: no border. Inner BaseWeb input: the only border.
+   ────────────────────────────────────────────────────────────────────────── */
+[data-testid="stTextArea"] { background: transparent !important; }
+[data-testid="stTextArea"] label {
+  color: var(--ink) !important;
+  font-weight: 600 !important;
+  font-size: 13.5px !important;
+}
+[data-testid="stTextArea"] [data-baseweb="textarea"],
+[data-testid="stTextArea"] [data-baseweb="base-input"] {
+  background: var(--paper-2) !important;
+  border: 1.5px solid var(--line) !important;
+  border-radius: 12px !important;
+  box-shadow: none !important;
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
 [data-testid="stTextArea"] textarea {
-    border-radius: 12px !important;
-    border: 1.5px solid #e0e7ff !important;
-    background: white !important;
-    font-size: 14px !important;
-    color: #374151 !important;
-    transition: border-color 0.2s;
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  color: var(--ink) !important;
+  font-size: 14px !important;
+  line-height: 1.6 !important;
+  padding: 12px 14px !important;
+  font-family: 'Inter', sans-serif !important;
 }
-[data-testid="stTextArea"] textarea:focus {
-    border-color: #6366f1 !important;
-    box-shadow: 0 0 0 3px rgba(99,102,241,0.1) !important;
+[data-testid="stTextArea"] [data-baseweb="textarea"]:focus-within,
+[data-testid="stTextArea"] [data-baseweb="base-input"]:focus-within {
+  border-color: var(--amber) !important;
+  background: var(--cream) !important;
+  box-shadow: 0 0 0 3px rgba(245,165,36,0.16) !important;
 }
 
-/* OR separator */
+/* ── OR separator ───────────────────────────────────────────────────────── */
 .or-sep {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    padding-top: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding-top: 42px;
 }
 .or-pill {
-    background: #e0e7ff;
-    color: #4f46e5;
-    border-radius: 20px;
-    padding: 4px 10px;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
+  background: var(--paper);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 11px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 1px;
 }
 
-/* ── Load button ── */
+/* ── Primary button (Load) ─────────────────────────────────────────────── */
 .stButton > button {
-    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%) !important;
-    color: white !important;
-    border: none !important;
-    border-radius: 12px !important;
-    font-weight: 600 !important;
-    font-size: 15px !important;
-    padding: 0.55rem 2rem !important;
-    box-shadow: 0 4px 16px rgba(79,70,229,0.38) !important;
-    transition: all 0.2s ease !important;
-    letter-spacing: 0.2px;
+  background: var(--ink) !important;
+  color: var(--paper) !important;
+  border: 1px solid var(--ink) !important;
+  border-radius: 12px !important;
+  font-weight: 600 !important;
+  font-size: 14.5px !important;
+  padding: 0.6rem 1.6rem !important;
+  letter-spacing: 0.15px;
+  box-shadow: 0 2px 0 rgba(15,17,23,0.06) !important;
+  transition: transform 0.08s ease, background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
 }
 .stButton > button:hover {
-    opacity: 0.88 !important;
-    box-shadow: 0 7px 22px rgba(79,70,229,0.48) !important;
-    transform: translateY(-1px) !important;
+  background: var(--amber) !important;
+  border-color: var(--amber) !important;
+  color: var(--ink) !important;
+}
+.stButton > button:active { transform: translateY(1px); }
+.stButton > button:focus { box-shadow: 0 0 0 3px rgba(245,165,36,0.30) !important; }
+
+/* small clear-history button */
+.clear-btn .stButton > button {
+  background: transparent !important;
+  border: 1px solid var(--line) !important;
+  color: var(--muted) !important;
+  padding: 4px 10px !important;
+  font-size: 12px !important;
+  border-radius: 8px !important;
+}
+.clear-btn .stButton > button:hover {
+  border-color: var(--amber) !important;
+  color: var(--amber-d) !important;
+  background: var(--amber-soft) !important;
 }
 
-/* ── Divider ── */
-.chat-divider {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    margin: 32px 0 22px;
+/* ── Conversation rule ─────────────────────────────────────────────────── */
+.conv-rule {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 30px 0 18px;
 }
-.chat-divider-line { flex: 1; height: 1px; background: #dde3f0; }
-.chat-divider-label {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 1px;
-    text-transform: uppercase;
-    color: #94a3b8;
-    white-space: nowrap;
+.conv-rule .line { flex: 1; height: 1px; background: var(--line); }
+.conv-rule .lbl {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 1.3px;
+  text-transform: uppercase;
+  color: var(--muted-2);
 }
 
-/* ── Status bar ── */
+/* ── Status bar ─────────────────────────────────────────────────────────── */
 .status-bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    background: white;
-    border: 1px solid #e2e8f0;
-    border-radius: 12px;
-    padding: 10px 16px;
-    font-size: 13px;
-    color: #475569;
-    margin-bottom: 20px;
-    box-shadow: 0 1px 6px rgba(0,0,0,0.04);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--cream);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--amber);
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--ink);
+  margin-bottom: 14px;
 }
 .status-dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: #10b981;
-    flex-shrink: 0;
-    box-shadow: 0 0 0 3px rgba(16,185,129,0.2);
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 3px rgba(47,143,92,0.15);
+  animation: pulse-dot 2.4s ease-in-out infinite;
 }
+@keyframes pulse-dot {
+  0%,100% { box-shadow: 0 0 0 3px rgba(47,143,92,0.15); }
+  50%     { box-shadow: 0 0 0 5px rgba(47,143,92,0.06); }
+}
+.status-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 300px;
+}
+.status-meta { color: var(--muted); font-size: 12.5px; }
 .status-tag {
-    background: #ede9fe;
-    color: #6d28d9;
-    border-radius: 6px;
-    padding: 2px 8px;
-    font-size: 11px;
-    font-weight: 600;
-    margin-left: auto;
+  background: var(--amber-soft);
+  color: #6a4a07;
+  border: 1px solid #f3d98c;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: auto;
+  white-space: nowrap;
 }
 
-/* ── Chat message bubbles ── */
-.chat-row {
-    display: flex;
-    align-items: flex-start;
-    margin-bottom: 6px;
-    gap: 10px;
-}
+/* ── Chat bubbles ───────────────────────────────────────────────────────── */
+.chat-row { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 10px; }
 .chat-row.user { justify-content: flex-end; }
 .chat-row.ai   { justify-content: flex-start; }
 
 .ai-avatar {
-    width: 32px; height: 32px;
-    border-radius: 50%;
-    flex-shrink: 0;
-    margin-top: 3px;
-    overflow: hidden;
-    box-shadow: 0 2px 8px rgba(79,70,229,0.25);
-    border: 1px solid #e0e7ff;
-    background: #fff;
+  width: 32px; height: 32px;
+  border-radius: 9px;
+  flex-shrink: 0;
+  margin-top: 4px;
+  overflow: hidden;
+  background: var(--ink);
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 2px rgba(15,17,23,0.05);
 }
-.ai-avatar img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-}
+.ai-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 .bubble-user {
-    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
-    color: white;
-    border-radius: 20px 20px 4px 20px;
-    padding: 12px 18px;
-    max-width: 72%;
-    font-size: 15px;
-    line-height: 1.65;
-    box-shadow: 0 4px 18px rgba(79,70,229,0.3);
-    word-wrap: break-word;
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 18px 18px 4px 18px;
+  padding: 10px 16px;
+  max-width: 72%;
+  font-size: 14.5px;
+  line-height: 1.6;
+  box-shadow: 0 2px 6px rgba(15,17,23,0.08);
+  word-wrap: break-word;
 }
 
 .bubble-ai {
-    background: white;
-    border: 1px solid #e8edf5;
-    border-radius: 4px 20px 20px 20px;
-    padding: 14px 20px;
-    max-width: 78%;
-    font-size: 15px;
-    line-height: 1.72;
-    color: #1e293b;
-    box-shadow: 0 2px 16px rgba(0,0,0,0.06);
-    word-wrap: break-word;
+  background: var(--cream);
+  border: 1px solid var(--line);
+  border-radius: 4px 18px 18px 18px;
+  padding: 12px 16px;
+  max-width: 78%;
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(15,17,23,0.04);
+  word-wrap: break-word;
 }
-.bubble-ai p  { margin: 0 0 10px; }
+.bubble-ai p  { margin: 0 0 8px; }
 .bubble-ai p:last-child { margin: 0; }
-.bubble-ai ul, .bubble-ai ol { padding-left: 18px; margin: 8px 0; }
-.bubble-ai li { margin-bottom: 4px; }
-.bubble-ai strong { color: #1e1b4b; font-weight: 600; }
+.bubble-ai ul, .bubble-ai ol { padding-left: 18px; margin: 6px 0; }
+.bubble-ai li { margin-bottom: 3px; }
+.bubble-ai strong { color: var(--ink); font-weight: 700; }
 .bubble-ai code {
-    background: #f0f2f8;
-    color: #4f46e5;
-    border-radius: 5px;
-    padding: 2px 7px;
-    font-size: 13px;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
+  background: var(--paper-2);
+  color: #6a4a07;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 1px 6px;
+  font-size: 12.5px;
+  font-family: 'JetBrains Mono', monospace !important;
 }
 .bubble-ai pre {
-    background: #0f172a;
-    border-radius: 10px;
-    padding: 14px 16px;
-    overflow-x: auto;
-    margin: 10px 0;
+  background: var(--ink);
+  border-radius: 10px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 10px 0;
+  border: 1px solid var(--ink-2);
 }
 .bubble-ai pre code {
-    background: none !important;
-    color: #e2e8f0;
-    padding: 0;
+  background: none !important;
+  color: #f1ead8 !important;
+  padding: 0;
+  border: none;
+  font-size: 12.5px;
 }
 
-/* ── Chat input ── */
+/* ── Chat input ─────────────────────────────────────────────────────────── */
 [data-testid="stChatInput"] {
-    border-radius: 26px !important;
-    border: 2px solid #6366f1 !important;
-    box-shadow: 0 4px 24px rgba(99,102,241,0.16) !important;
-    overflow: hidden;
-    background: white !important;
-    transition: box-shadow 0.2s, border-color 0.2s;
+  background: var(--cream) !important;
+  border: 1.5px solid var(--line) !important;
+  border-radius: 14px !important;
+  box-shadow: 0 1px 3px rgba(15,17,23,0.04) !important;
+  overflow: hidden;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 [data-testid="stChatInput"]:focus-within {
-    border-color: #4f46e5 !important;
-    box-shadow: 0 6px 30px rgba(99,102,241,0.26) !important;
+  border-color: var(--amber) !important;
+  box-shadow: 0 0 0 3px rgba(245,165,36,0.18) !important;
 }
 [data-testid="stChatInput"] textarea {
-    font-size: 15px !important;
-    color: #1e293b !important;
-    background: white !important;
+  font-size: 14.5px !important;
+  color: var(--ink) !important;
+  background: transparent !important;
 }
+[data-testid="stChatInputSubmitButton"] svg { fill: var(--amber-d) !important; }
 
-/* ── Sources expander ── */
+/* ── Sources expander ──────────────────────────────────────────────────── */
 details[data-testid="stExpander"] {
-    background: #fafbff !important;
-    border: 1px solid #e0e7ff !important;
-    border-radius: 12px !important;
-    overflow: hidden;
-    margin: 4px 0 16px 42px;
+  background: var(--paper-2) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 12px !important;
+  overflow: hidden;
+  margin: 4px 0 16px 42px;
+  box-shadow: none !important;
+}
+details[data-testid="stExpander"] summary {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: var(--ink) !important;
+  padding: 9px 14px !important;
+}
+details[data-testid="stExpander"] summary:hover { color: var(--amber-d) !important; }
+
+/* ── Alerts (used inside sources) ──────────────────────────────────────── */
+[data-testid="stAlert"] {
+  border-radius: 10px !important;
+  border: 1px solid var(--line) !important;
+  border-left: 3px solid var(--amber) !important;
+  background: var(--cream) !important;
+  font-size: 13.5px !important;
+  color: var(--ink) !important;
 }
 
-/* ── Empty state ── */
-.empty-state {
-    text-align: center;
-    padding: 52px 0 32px;
-    color: #94a3b8;
+/* ── Empty state ───────────────────────────────────────────────────────── */
+.empty {
+  text-align: center;
+  padding: 56px 24px 30px;
+  color: var(--muted);
+  border: 1px dashed var(--line-2);
+  border-radius: 18px;
+  background: var(--cream);
+  margin-top: 20px;
 }
-.empty-state .icon-wrap {
-    margin: 0 auto 14px;
-    width: 56px;
-    height: 56px;
+.empty .ico {
+  margin: 0 auto 14px;
+  width: 64px; height: 64px;
+  background: var(--ink);
+  border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 14px rgba(15,17,23,0.10);
 }
-.empty-state .icon-wrap img { width: 100%; height: 100%; object-fit: contain; }
-.empty-state h3 { font-size: 17px; font-weight: 600; color: #64748b; margin: 0 0 6px; }
-.empty-state p  { font-size: 13px; margin: 0; line-height: 1.65; }
+.empty .ico img { width: 38px; height: 38px; object-fit: contain; }
+.empty h3 {
+  font-size: 17px; font-weight: 700; color: var(--ink);
+  margin: 0 0 6px; letter-spacing: -0.01em;
+}
+.empty p { font-size: 13.5px; margin: 0; line-height: 1.7; color: var(--muted); }
+.empty .hints { display: flex; gap: 8px; justify-content: center; margin-top: 18px; flex-wrap: wrap; }
+.empty .hint {
+  background: var(--paper-2);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
 
-/* ── Scrollbar ── */
-::-webkit-scrollbar { width: 5px; }
+/* ── Spinner ───────────────────────────────────────────────────────────── */
+[data-testid="stSpinner"] > div {
+  border-color: var(--amber) !important;
+  border-top-color: transparent !important;
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #c7d2fe; border-radius: 8px; }
+::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: var(--amber); }
+
+/* ── Sidebar ───────────────────────────────────────────────────────────── */
+[data-testid="stSidebar"] {
+  background: var(--cream) !important;
+  border-right: 1px solid var(--line) !important;
+}
+
+/* ── Hide Streamlit chrome we don't need ───────────────────────────────── */
+#MainMenu, footer, header[data-testid="stHeader"] { background: transparent !important; }
 </style>
 """, unsafe_allow_html=True)
 
 
+# ── Top accent rail ───────────────────────────────────────────────────────────
+st.markdown('<div class="top-rail"></div>', unsafe_allow_html=True)
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
-
-
 def _user_bubble(content: str) -> None:
     safe = html.escape(content)
     st.markdown(
@@ -344,35 +554,58 @@ def _ai_bubble(content: str) -> None:
 
 
 # ── Header ────────────────────────────────────────────────────────────────────
-st.image(str(_assets / "sift_logo.png"), width=320)
-st.markdown(
-    '<p class="sift-tagline">Retrieval that reasons.</p>',
-    unsafe_allow_html=True,
+st.markdown(f"""
+<div class="sift-head">
+  <img class="logo" src="{_LOGO_DATA_URI}" alt="Sift" />
+</div>
+<p class="lede">
+Drop in a <b>PDF, DOCX, or TXT</b> &mdash; or paste any text &mdash; then ask questions in plain English.
+Every answer is grounded in <b>retrieved passages from your document</b>, with sources you can verify.
+</p>
+<div class="sift-chips">
+  <span class="sift-chip warm">SBERT &middot; BM25 &middot; RRF</span>
+  <span class="sift-chip">Sentence Window</span>
+  <span class="sift-chip dim">Groq &middot; Llama-3</span>
+</div>
+""", unsafe_allow_html=True)
+
+
+# ── Upload section ────────────────────────────────────────────────────────────
+st.markdown('<p class="sec-cap">Your documents</p>', unsafe_allow_html=True)
+
+_CARD_CSS = (
+    "{ background: #FFFDF7; border: 1px solid #E8E2D2; border-radius: 16px; "
+    "padding: 18px 18px 14px; box-shadow: 0 1px 2px rgba(15,17,23,0.03); "
+    "margin-bottom: 14px; }"
 )
 
+with stylable_container(key="upload_card", css_styles=_CARD_CSS):
+    col1, col_sep, col2 = st.columns([5, 1, 5], gap="small")
 
-# ── Upload section (original layout kept exactly) ────────────────────────────
-col1, col_sep, col2 = st.columns([5, 1, 5])
+    with col1:
+        uploaded_files = st.file_uploader(
+            "Upload one or more files",
+            type=["pdf", "docx", "txt"],
+            accept_multiple_files=True,
+            label_visibility="visible",
+        )
 
-with col1:
-    uploaded_files = st.file_uploader(
-        "Upload documents (PDF, DOCX, TXT)",
-        type=["pdf", "docx", "txt"],
-        accept_multiple_files=True,
-    )
+    with col_sep:
+        st.markdown(
+            '<div class="or-sep"><div class="or-pill">OR</div></div>',
+            unsafe_allow_html=True,
+        )
 
-with col_sep:
-    st.markdown(
-        '<div class="or-sep"><div class="or-pill">OR</div></div>',
-        unsafe_allow_html=True,
-    )
-
-with col2:
-    pasted_text = st.text_area("Paste your text here", height=150)
+    with col2:
+        pasted_text = st.text_area(
+            "Paste text",
+            height=148,
+            placeholder="Paste any text here — an article, a contract, your notes…",
+        )
 
 _, btn_col, _ = st.columns([4, 2, 4])
 with btn_col:
-    load_clicked = st.button("⚡ Load", use_container_width=True)
+    load_clicked = st.button("Load and index", use_container_width=True)
 
 
 # ── Load logic ────────────────────────────────────────────────────────────────
@@ -403,7 +636,7 @@ if load_clicked:
                 retriever.save(cache_key)
                 idx_status = "built"
             else:
-                idx_status = "cached ✓"
+                idx_status = "cached"
 
         st.session_state.update({
             "docs": docs,
@@ -429,7 +662,6 @@ combined_text = st.session_state.get("combined_text", "")
 # ── Chat section ──────────────────────────────────────────────────────────────
 if combined_text and retriever:
 
-    # auto-scroll to here after fresh load
     if st.session_state.get("_scroll_to_chat"):
         st.session_state._scroll_to_chat = False
         components.html("""<script>
@@ -437,56 +669,52 @@ if combined_text and retriever:
             var main = window.parent.document.querySelector('section.main')
                     || window.parent.document.querySelector('.main');
             if (main) main.scrollTo({top: 99999, behavior: 'smooth'});
-        }, 300);
+        }, 280);
         </script>""", height=0)
 
-    # section divider
     info = st.session_state.get("idx_info", {})
     doc_names = ", ".join(d["name"] for d in docs)
+    short_names = doc_names if len(doc_names) < 48 else doc_names[:45] + "…"
+
     st.markdown(f"""
-    <div class="chat-divider">
-      <div class="chat-divider-line"></div>
-      <div class="chat-divider-label">Conversation</div>
-      <div class="chat-divider-line"></div>
+    <div class="conv-rule">
+      <div class="line"></div>
+      <div class="lbl">Conversation</div>
+      <div class="line"></div>
     </div>
     <div class="status-bar">
       <div class="status-dot"></div>
-      <span><strong>{html.escape(doc_names)}</strong>
-        &nbsp;·&nbsp; {info.get('num_docs', 0)} doc(s)
-        &nbsp;·&nbsp; {info.get('num_chunks', 0)} chunks
-      </span>
+      <span class="status-name">{html.escape(short_names)}</span>
+      <span class="status-meta">&nbsp;·&nbsp;{info.get('num_docs', 0)} doc &nbsp;·&nbsp; {info.get('num_chunks', 0):,} sentences</span>
       <div class="status-tag">{info.get('status', 'ready')}</div>
     </div>
     """, unsafe_allow_html=True)
 
-    # clear button — right-aligned, minimal
     _, clr = st.columns([9, 1])
     with clr:
-        if st.button("✕", help="Clear chat"):
+        st.markdown('<div class="clear-btn">', unsafe_allow_html=True)
+        if st.button("Clear", help="Clear chat history"):
             st.session_state.messages = []
             st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # render history + sources stored alongside messages
-    for i, msg in enumerate(st.session_state.messages):
+    for msg in st.session_state.messages:
         if msg["role"] == "user":
             _user_bubble(msg["content"])
         else:
             _ai_bubble(msg["content"])
-            # render stored sources for this turn if available
             if msg.get("sources"):
                 best = msg["sources"][0]["score"] or 1
-                with st.expander("📚 Sources", expanded=False):
-                    for i, r in enumerate(msg["sources"], 1):
+                with st.expander("Sources", expanded=False):
+                    for j, r in enumerate(msg["sources"], 1):
                         pct = int((r["score"] / best) * 100)
                         matched = r.get("matched_sentence") or r.get("text", "")
-                        st.caption(f"#{i} · **{r['doc_name']}** · {r.get('source', '')} · {pct}% relevance")
+                        st.caption(f"#{j} · **{r['doc_name']}** · {r.get('source', '')} · {pct}% relevance")
                         st.info(matched)
-                        st.divider()
 
-    # new question
     if question := st.chat_input("Ask anything about your document…"):
         st.session_state.messages.append({"role": "user", "content": question})
         _user_bubble(question)
@@ -498,8 +726,6 @@ if combined_text and retriever:
                 answer = "I couldn't find relevant content in the document for that question."
                 sources = []
             else:
-                # Pass window context to LLM (matched sentence + neighbours),
-                # but cap each chunk to avoid flooding the prompt.
                 context_chunks = [r["text"][:600] for r in results]
                 sources = results
                 try:
@@ -524,21 +750,28 @@ if combined_text and retriever:
 
         if sources:
             best = sources[0]["score"] or 1
-            with st.expander("📚 Sources", expanded=False):
+            with st.expander("Sources", expanded=False):
                 for r in sources:
                     pct = int((r["score"] / best) * 100)
-                    st.markdown(f"> {r['text']}")
+                    matched = r.get("matched_sentence") or r.get("text", "")
                     st.caption(
                         f"**{r['doc_name']}** · {r.get('source', '')} · "
                         f"relevance {pct}%"
                     )
-                    st.divider()
+                    st.info(matched)
 
 else:
     st.markdown(f"""
-    <div class="empty-state">
-      <div class="icon-wrap"><img src="{_ICON_DATA_URI}" alt="" /></div>
+    <div class="empty">
+      <div class="ico"><img src="{_ICON_DATA_URI}" alt="" /></div>
       <h3>No document loaded yet</h3>
-      <p>Upload a PDF, DOCX, or TXT above — or paste text —<br>then click <strong>Load</strong> to start the conversation.</p>
+      <p>Upload a PDF, DOCX, or TXT — or paste text — then click <b>Load and index</b>.<br>
+      Sift will read it once and let you ask questions afterwards.</p>
+      <div class="hints">
+        <span class="hint">Research papers</span>
+        <span class="hint">Contracts</span>
+        <span class="hint">Meeting notes</span>
+        <span class="hint">Long articles</span>
+      </div>
     </div>
     """, unsafe_allow_html=True)

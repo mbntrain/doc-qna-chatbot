@@ -1,0 +1,19 @@
+[theme]
+# Sift — Lumen Sieve palette
+# warm cream surface, dark navy text, sodium-orange accent
+base = "light"
+primaryColor = "#F5A524"
+backgroundColor = "#FAF7F0"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#0F1117"
+font = "sans serif"
+
+[client]
+toolbarMode = "minimal"
+showErrorDetails = true
+
+[ui]
+hideTopBar = false
+
+[browser]
+gatherUsageStats = false
