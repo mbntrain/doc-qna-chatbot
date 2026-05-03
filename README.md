@@ -5,7 +5,7 @@
 <br />
 
 <div align="center">
-  <img src="assets/sift_logo.png" width="240" alt="Sift" />
+  <!--<img src="assets/sift_logo.png" width="240" alt="Sift" />-->
   <p><strong>Ask questions of your documents. Get answers grounded in the source.</strong></p>
   <p>
     <img src="https://img.shields.io/badge/python-3.10%2B-blue?style=flat-square&logo=python&logoColor=white" alt="Python" />
