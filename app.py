@@ -412,19 +412,21 @@ header[data-testid="stHeader"] { background: transparent !important; }
 
 /* ── Primary button ──────────────────────────────────────────────────────── */
 .stButton > button {
-  background: #855300 !important;
+  background: linear-gradient(180deg, #f59e0b 0%, #ea8c00 100%) !important;
   color: #ffffff !important;
-  border: 1px solid #855300 !important;
-  border-radius: 12px !important;
-  font-weight: 600 !important;
+  border: 1px solid #ea8c00 !important;
+  border-radius: 14px !important;
+  font-weight: 800 !important;
   font-size: 14px !important;
   padding: 0.55rem 1.5rem !important;
-  box-shadow: 0 2px 8px rgba(133,83,0,0.2) !important;
+  letter-spacing: 0.8px !important;
+  text-transform: uppercase !important;
+  box-shadow: 0 8px 20px rgba(245,158,11,0.28) !important;
   transition: background 0.15s ease, transform 0.08s ease;
 }
-.stButton > button:hover  { background: #6b4400 !important; border-color: #6b4400 !important; }
+.stButton > button:hover  { background: linear-gradient(180deg, #ffab1f 0%, #f59e0b 100%) !important; border-color: #f59e0b !important; }
 .stButton > button:active { transform: translateY(1px); }
-.stButton > button:focus  { box-shadow: 0 0 0 3px rgba(133,83,0,0.22) !important; }
+.stButton > button:focus  { box-shadow: 0 0 0 3px rgba(245,158,11,0.20), 0 8px 20px rgba(245,158,11,0.28) !important; }
 
 /* Clear button override */
 .clear-btn .stButton > button {
@@ -594,34 +596,6 @@ details[data-testid="stExpander"] summary:hover { color: var(--amber-dark) !impo
   color: var(--muted);
 }
 
-/* ── Upload card container ──────────────────────────────────────────────── */
-.st-key-upload_card {
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 16px;
-  padding: 20px 20px 16px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-  margin-bottom: 16px;
-}
-
-/* ── Load button container ──────────────────────────────────────────────── */
-.st-key-load_button button {
-  background: linear-gradient(180deg, #f59e0b 0%, #ea8c00 100%) !important;
-  color: #ffffff !important;
-  border: 1px solid #ea8c00 !important;
-  border-radius: 14px !important;
-  font-weight: 800 !important;
-  letter-spacing: 0.8px !important;
-  text-transform: uppercase !important;
-  box-shadow: 0 8px 20px rgba(245,158,11,0.28) !important;
-}
-.st-key-load_button button:hover {
-  background: linear-gradient(180deg, #ffab1f 0%, #f59e0b 100%) !important;
-  border-color: #f59e0b !important;
-}
-.st-key-load_button button:focus {
-  box-shadow: 0 0 0 3px rgba(245,158,11,0.20), 0 8px 20px rgba(245,158,11,0.28) !important;
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -700,7 +674,7 @@ if not (combined_text and retriever):
         unsafe_allow_html=True,
     )
 
-    with st.container(key="upload_card"):
+    with st.container():
         col1, col_sep, col2 = st.columns([5, 1, 5], gap="small")
         with col1:
             st.markdown('<div class="section-label">Upload documents</div>', unsafe_allow_html=True)
@@ -723,8 +697,7 @@ if not (combined_text and retriever):
 
     _, btn_col, _ = st.columns([4, 2, 4])
     with btn_col:
-        with st.container(key="load_button"):
-            load_clicked = st.button("LOAD", use_container_width=True)
+      load_clicked = st.button("LOAD", use_container_width=True)
 
 else:
     load_clicked   = False
