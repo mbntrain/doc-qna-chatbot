@@ -70,7 +70,14 @@ st.markdown("""
   --nav-text:     #b45309;
 }
 
-html, body, [class*="css"], [class*="st-"] {
+/* Safer global styling: avoid broad [class*="css"] / [class*="st-"] selectors */
+html, body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+  color: var(--primary);
+}
+.stApp,
+[data-testid="stAppViewContainer"],
+[data-testid="stMain"] {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
   color: var(--primary);
 }
@@ -436,7 +443,13 @@ header[data-testid="stHeader"] { background: transparent !important; }
 }
 
 /* ── File uploader ───────────────────────────────────────────────────────── */
-[data-testid="stFileUploader"] { background: transparent !important; border: none !important; padding: 0 !important; }
+/* Keep uploader styling visual only; do not force internal layout */
+[data-testid="stFileUploader"] {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+}
+
 [data-testid="stFileUploader"] section,
 [data-testid="stFileUploaderDropzone"] {
   background: #fff !important;
@@ -444,27 +457,28 @@ header[data-testid="stHeader"] { background: transparent !important; }
   border-radius: 12px !important;
   padding: 18px 16px !important;
   transition: border-color .18s, background .18s;
-}
-[data-testid="stFileUploader"] section:hover,
-[data-testid="stFileUploaderDropzone"]:hover { border-color: var(--amber) !important; background: var(--nav-active) !important; }
-[data-testid="stFileUploaderDropzoneInstructions"] {
-  display: none !important;
-}
-[data-testid="stFileUploader"] label { color: var(--primary) !important; font-weight: 600 !important; font-size: 13.5px !important; }
-[data-testid="stFileUploader"] small,
-[data-testid="stFileUploader"] [data-testid="stFileUploaderDropzoneInstructions"] span { color: var(--secondary) !important; }
-[data-testid="stFileUploaderDropzone"] {
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
   min-height: 118px !important;
 }
+
+[data-testid="stFileUploader"] section:hover,
+[data-testid="stFileUploaderDropzone"]:hover {
+  border-color: var(--amber) !important;
+  background: var(--nav-active) !important;
+}
+
+[data-testid="stFileUploader"] label {
+  color: var(--primary) !important;
+  font-weight: 600 !important;
+  font-size: 13.5px !important;
+}
+
+[data-testid="stFileUploader"] small,
+[data-testid="stFileUploader"] [data-testid="stFileUploaderDropzoneInstructions"] span {
+  color: var(--secondary) !important;
+}
+
+/* Style button appearance only; avoid layout/child overrides */
 [data-testid="stFileUploader"] button {
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  min-height: 46px !important;
-  line-height: 1 !important;
   background: #fff !important;
   border: 1px solid rgba(245,158,11,0.32) !important;
   border-radius: 12px !important;
@@ -476,22 +490,18 @@ header[data-testid="stHeader"] { background: transparent !important; }
   padding: 12px 22px !important;
   box-shadow: 0 4px 12px rgba(245,158,11,0.10) !important;
 }
-[data-testid="stFileUploader"] button span,
-[data-testid="stFileUploader"] button div {
-  line-height: 1 !important;
-}
+
 [data-testid="stFileUploader"] button:hover {
   border-color: var(--amber) !important;
   color: var(--amber-dark) !important;
   background: #fffaf0 !important;
 }
-[data-testid="stFileUploader"] [data-testid="stFileUploaderFile"] { background: #fff !important; border: 1px solid var(--border-2) !important; border-radius: 10px !important; margin-top: 8px !important; }
 
-.upload-hint {
-  margin-top: 10px;
-  font-size: 12px;
-  color: var(--secondary);
-  line-height: 1.5;
+[data-testid="stFileUploader"] [data-testid="stFileUploaderFile"] {
+  background: #fff !important;
+  border: 1px solid var(--border-2) !important;
+  border-radius: 10px !important;
+  margin-top: 8px !important;
 }
 
 /* ── Text area ───────────────────────────────────────────────────────────── */
@@ -516,7 +526,6 @@ header[data-testid="stHeader"] { background: transparent !important; }
   border-color: var(--amber) !important;
   box-shadow: 0 0 0 3px rgba(245,158,11,0.13), 0 0 12px rgba(245,158,11,0.06) !important;
 }
-/* Kill ALL inner outlines/borders so only the pill itself shows focus */
 [data-testid="stChatInput"] textarea,
 [data-testid="stChatInput"] textarea:focus,
 [data-testid="stChatInput"] [data-baseweb="base-input"],
@@ -533,7 +542,7 @@ header[data-testid="stHeader"] { background: transparent !important; }
   font-family: 'Inter', sans-serif !important;
 }
 [data-testid="stChatInput"] textarea::placeholder { color: var(--muted) !important; font-style: italic; }
-/* Send button — amber pill, always styled */
+
 [data-testid="stChatInputSubmitButton"] {
   display: flex !important;
   align-items: center !important;
@@ -619,7 +628,7 @@ details[data-testid="stExpander"] summary:hover { color: var(--amber-dark) !impo
 
 # ── State ─────────────────────────────────────────────────────────────────────
 retriever: SentenceWindowRetriever | None = st.session_state.get("retriever")
-docs         = st.session_state.get("docs", [])
+docs          = st.session_state.get("docs", [])
 combined_text = st.session_state.get("combined_text", "")
 
 
@@ -692,34 +701,30 @@ if not (combined_text and retriever):
     )
 
     with st.container(key="upload_card"):
-      col1, col_sep, col2 = st.columns([5, 1, 5], gap="small")
-      with col1:
-        st.markdown('<div class="section-label">Upload documents</div>', unsafe_allow_html=True)
-        uploaded_files = st.file_uploader(
-          "Upload one or more files",
-          type=["pdf", "docx", "txt"],
-          accept_multiple_files=True,
-          label_visibility="collapsed",
-        )
-        st.markdown(
-          '<div class="upload-hint">PDF, DOCX, or TXT · up to 200MB per file</div>',
-          unsafe_allow_html=True,
-        )
-      with col_sep:
-        st.markdown('<div class="or-sep"><div class="or-pill">OR</div></div>', unsafe_allow_html=True)
-      with col2:
-        st.markdown('<div class="section-label">Paste text</div>', unsafe_allow_html=True)
-        pasted_text = st.text_area(
-          "Paste text",
-          height=148,
-          placeholder="Paste any text here — an article, a contract, your notes…",
-          label_visibility="collapsed",
-        )
+        col1, col_sep, col2 = st.columns([5, 1, 5], gap="small")
+        with col1:
+            st.markdown('<div class="section-label">Upload documents</div>', unsafe_allow_html=True)
+            uploaded_files = st.file_uploader(
+                "Upload one or more files",
+                type=["pdf", "docx", "txt"],
+                accept_multiple_files=True,
+                label_visibility="collapsed",
+            )
+        with col_sep:
+            st.markdown('<div class="or-sep"><div class="or-pill">OR</div></div>', unsafe_allow_html=True)
+        with col2:
+            st.markdown('<div class="section-label">Paste text</div>', unsafe_allow_html=True)
+            pasted_text = st.text_area(
+                "Paste text",
+                height=148,
+                placeholder="Paste any text here — an article, a contract, your notes…",
+                label_visibility="collapsed",
+            )
 
     _, btn_col, _ = st.columns([4, 2, 4])
     with btn_col:
-      with st.container(key="load_button"):
-        load_clicked = st.button("LOAD", use_container_width=True)
+        with st.container(key="load_button"):
+            load_clicked = st.button("LOAD", use_container_width=True)
 
 else:
     load_clicked   = False
@@ -866,15 +871,14 @@ if combined_text and retriever:
         else:
             _ai_bubble(msg["content"], sources=msg.get("sources"))
 
-    # meta strip sits just above the chat input
     st.markdown(
         '<div class="input-meta">'
         '<span class="input-meta-item">'
         '<svg width="9" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>'
-        'Encrypted Analysis</span>'
+        'FAISS indexing</span>'
         '<span class="input-meta-item">'
         '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>'
-        '24 Hour Retention</span>'
+        'Document Caching</span>'
         '<span class="input-meta-item">'
         '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>'
         'Llama-3 Enhanced</span>'
