@@ -36,15 +36,6 @@ from core.parser import parse_file
 from core.sentence_window import SentenceWindowRetriever
 from core.llm import generate_answer
 
-try:
-    from streamlit_extras.stylable_container import stylable_container
-except ImportError:
-    from contextlib import contextmanager
-
-    @contextmanager
-    def stylable_container(key, css_styles):
-        yield
-
 
 def _md_to_html(text: str) -> str:
     try:
@@ -404,6 +395,14 @@ header[data-testid="stHeader"] { background: transparent !important; }
   letter-spacing: 1px;
 }
 
+.section-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--primary);
+  margin: 0 0 10px;
+  letter-spacing: -0.1px;
+}
+
 /* ── Primary button ──────────────────────────────────────────────────────── */
 .stButton > button {
   background: #855300 !important;
@@ -448,12 +447,52 @@ header[data-testid="stHeader"] { background: transparent !important; }
 }
 [data-testid="stFileUploader"] section:hover,
 [data-testid="stFileUploaderDropzone"]:hover { border-color: var(--amber) !important; background: var(--nav-active) !important; }
+[data-testid="stFileUploaderDropzoneInstructions"] {
+  display: none !important;
+}
 [data-testid="stFileUploader"] label { color: var(--primary) !important; font-weight: 600 !important; font-size: 13.5px !important; }
 [data-testid="stFileUploader"] small,
 [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzoneInstructions"] span { color: var(--secondary) !important; }
-[data-testid="stFileUploader"] button { background: #fff !important; border: 1px solid var(--border-2) !important; border-radius: 8px !important; color: var(--primary) !important; font-weight: 600 !important; font-size: 12.5px !important; padding: 6px 14px !important; box-shadow: none !important; }
-[data-testid="stFileUploader"] button:hover { border-color: var(--amber) !important; color: var(--amber-dark) !important; }
+[data-testid="stFileUploaderDropzone"] {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 118px !important;
+}
+[data-testid="stFileUploader"] button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 46px !important;
+  line-height: 1 !important;
+  background: #fff !important;
+  border: 1px solid rgba(245,158,11,0.32) !important;
+  border-radius: 12px !important;
+  color: var(--amber-dark) !important;
+  font-weight: 800 !important;
+  font-size: 13px !important;
+  letter-spacing: 0.6px !important;
+  text-transform: uppercase !important;
+  padding: 12px 22px !important;
+  box-shadow: 0 4px 12px rgba(245,158,11,0.10) !important;
+}
+[data-testid="stFileUploader"] button span,
+[data-testid="stFileUploader"] button div {
+  line-height: 1 !important;
+}
+[data-testid="stFileUploader"] button:hover {
+  border-color: var(--amber) !important;
+  color: var(--amber-dark) !important;
+  background: #fffaf0 !important;
+}
 [data-testid="stFileUploader"] [data-testid="stFileUploaderFile"] { background: #fff !important; border: 1px solid var(--border-2) !important; border-radius: 10px !important; margin-top: 8px !important; }
+
+.upload-hint {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--secondary);
+  line-height: 1.5;
+}
 
 /* ── Text area ───────────────────────────────────────────────────────────── */
 [data-testid="stTextArea"] { background: transparent !important; }
@@ -545,6 +584,35 @@ details[data-testid="stExpander"] summary:hover { color: var(--amber-dark) !impo
   text-transform: uppercase;
   color: var(--muted);
 }
+
+/* ── Upload card container ──────────────────────────────────────────────── */
+.st-key-upload_card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 20px 20px 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  margin-bottom: 16px;
+}
+
+/* ── Load button container ──────────────────────────────────────────────── */
+.st-key-load_button button {
+  background: linear-gradient(180deg, #f59e0b 0%, #ea8c00 100%) !important;
+  color: #ffffff !important;
+  border: 1px solid #ea8c00 !important;
+  border-radius: 14px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.8px !important;
+  text-transform: uppercase !important;
+  box-shadow: 0 8px 20px rgba(245,158,11,0.28) !important;
+}
+.st-key-load_button button:hover {
+  background: linear-gradient(180deg, #ffab1f 0%, #f59e0b 100%) !important;
+  border-color: #f59e0b !important;
+}
+.st-key-load_button button:focus {
+  box-shadow: 0 0 0 3px rgba(245,158,11,0.20), 0 8px 20px rgba(245,158,11,0.28) !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -623,32 +691,35 @@ if not (combined_text and retriever):
         unsafe_allow_html=True,
     )
 
-    _CARD_CSS = (
-        "{ background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; "
-        "padding: 20px 20px 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); "
-        "margin-bottom: 16px; }"
-    )
-    with stylable_container(key="upload_card", css_styles=_CARD_CSS):
-        col1, col_sep, col2 = st.columns([5, 1, 5], gap="small")
-        with col1:
-            uploaded_files = st.file_uploader(
-                "Upload one or more files",
-                type=["pdf", "docx", "txt"],
-                accept_multiple_files=True,
-            )
-        with col_sep:
-            st.markdown('<div class="or-sep"><div class="or-pill">OR</div></div>',
-                        unsafe_allow_html=True)
-        with col2:
-            pasted_text = st.text_area(
-                "Paste text",
-                height=148,
-                placeholder="Paste any text here — an article, a contract, your notes…",
-            )
+    with st.container(key="upload_card"):
+      col1, col_sep, col2 = st.columns([5, 1, 5], gap="small")
+      with col1:
+        st.markdown('<div class="section-label">Upload documents</div>', unsafe_allow_html=True)
+        uploaded_files = st.file_uploader(
+          "Upload one or more files",
+          type=["pdf", "docx", "txt"],
+          accept_multiple_files=True,
+          label_visibility="collapsed",
+        )
+        st.markdown(
+          '<div class="upload-hint">PDF, DOCX, or TXT · up to 200MB per file</div>',
+          unsafe_allow_html=True,
+        )
+      with col_sep:
+        st.markdown('<div class="or-sep"><div class="or-pill">OR</div></div>', unsafe_allow_html=True)
+      with col2:
+        st.markdown('<div class="section-label">Paste text</div>', unsafe_allow_html=True)
+        pasted_text = st.text_area(
+          "Paste text",
+          height=148,
+          placeholder="Paste any text here — an article, a contract, your notes…",
+          label_visibility="collapsed",
+        )
 
     _, btn_col, _ = st.columns([4, 2, 4])
     with btn_col:
-        load_clicked = st.button("Load and index", use_container_width=True)
+      with st.container(key="load_button"):
+        load_clicked = st.button("LOAD", use_container_width=True)
 
 else:
     load_clicked   = False
@@ -676,6 +747,20 @@ if load_clicked:
         cache_key = SentenceWindowRetriever.content_hash(
             [f"{name}\n{text}" for name, text in raw_docs] + ["sw-v1"]
         )
+
+        st.markdown('<div id="loading-anchor"></div>', unsafe_allow_html=True)
+        components.html("""<script>
+        setTimeout(function(){
+          var anchor = window.parent.document.getElementById('loading-anchor');
+          if (anchor) {
+            anchor.scrollIntoView({behavior: 'smooth', block: 'center'});
+          } else {
+            var el = window.parent.document.querySelector('section.main')
+                  || window.parent.document.querySelector('.main');
+            if (el) el.scrollTo({top: 99999, behavior: 'smooth'});
+          }
+        }, 80);
+        </script>""", height=0)
 
         _build_ph = st.empty()
         _build_ph.markdown(

@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/sift_demo.gif" style="width: 100%; max-width: 1100px; height: auto;" alt="Sift — particles sifting through a retrieval filter" />
+  <img src="assets/sift_banner.gif" style="width: 100%; max-width: 1100px; height: auto;" alt="Sift — particles sifting through a retrieval filter" />
 </div>
 
 <br />
